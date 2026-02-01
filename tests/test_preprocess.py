@@ -25,11 +25,11 @@ def test_preprocess_flow(tmp_path, monkeypatch):
     
     # Create mock raw data
     df = pd.DataFrame({
-        "Unique Key": ["1", "2"],
-        "Created Date": ["2023-01-01", "2023-01-02"],
-        "Complaint Type": ["Pothole", "Noise"],
-        "Descriptor": ["Large", None],
-        "Incident Zip": ["10001", None]  # Testing area_id creation
+        "unique_key": ["1", "2"],
+        "created_date": ["2023-01-01", "2023-01-02"],
+        "complaint_type": ["Pothole", "Noise"],
+        "descriptor": ["Large", None],
+        "incident_zip": ["10001", None]  # Testing area_id creation
     })
     df.to_parquet(input_file)
     

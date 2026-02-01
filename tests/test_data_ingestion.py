@@ -8,15 +8,15 @@ from civinlp.utils.io import load_parquet
 
 def test_road_schema_validation():
     df = pd.DataFrame({
-        "Unique Key": ["123"],
-        "Created Date": ["2023-01-01"],
-        "Complaint Type": ["Pothole"]
+        "unique_key": ["123"],
+        "created_date": ["2023-01-01"],
+        "complaint_type": ["Pothole"]
     })
     assert RawRoadSchema.validate_columns(df) == []
     
     df_bad = pd.DataFrame({"Wrong": [1]})
     missing = RawRoadSchema.validate_columns(df_bad)
-    assert "Unique Key" in missing
+    assert "unique_key" in missing
 
 def test_download_roads_mock(tmp_path, monkeypatch):
     """Test the download logic by mocking pandas read_csv."""
@@ -24,9 +24,9 @@ def test_download_roads_mock(tmp_path, monkeypatch):
     
     # Mock data
     df_mock = pd.DataFrame({
-        "Unique Key": ["1"],
-        "Created Date": ["2023-01-01"],
-        "Complaint Type": ["Pothole"]
+        "unique_key": ["1"],
+        "created_date": ["2023-01-01"],
+        "complaint_type": ["Pothole"]
     })
     
     def mock_read_csv(*args, **kwargs):
@@ -39,7 +39,7 @@ def test_download_roads_mock(tmp_path, monkeypatch):
     assert output_file.exists()
     df_loaded = load_parquet(output_file)
     assert len(df_loaded) == 1
-    assert df_loaded.iloc[0]["Complaint Type"] == "Pothole"
+    assert df_loaded.iloc[0]["complaint_type"] == "Pothole"
 
 def test_load_nbi_mock(tmp_path, monkeypatch):
     input_csv = tmp_path / "nbi.csv"
