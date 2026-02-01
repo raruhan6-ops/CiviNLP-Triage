@@ -1,0 +1,529 @@
+PROJECT SPECIFICATION (TXT)
+================================
+
+Project Name
+------------
+CiviNLP Triage: Road + Bridge Maintenance Prioritization Tool
+
+One-line Summary
+----------------
+An end-to-end, reproducible NLP decision-support tool that converts public, real-world text records
+(e.g., citizen road complaints and bridge condition data) into structured defect predictions and
+a ranked maintenance priority list, with evaluation dashboards and research-ready exports.
+
+Primary Use (Research)
+----------------------
+1) Demonstrate that NLP signals from text improve maintenance triage compared to simple heuristics.
+2) Provide a reproducible pipeline and artifact (tool + code + experiment outputs) suitable for an
+   IEEE-style paper: dataset, baselines, models, ranking metrics, ablations, and error analysis.
+3) Provide a lightweight “planner” interface for interactive analysis and a “batch” mode for experiments.
+
+================================
+1. RESEARCH REQUIREMENTS
+================================
+
+1.1 Research Questions (RQ)
+--------------------------
+RQ1: Can road-related free-text reports be classified into defect categories with strong performance,
+     and can severity be inferred with usable reliability?
+RQ2: Can bridge condition severity be modeled/approximated using public structured condition data,
+     and optionally combined with text-derived indicators where available?
+RQ3: Does text-aware scoring produce better operational rankings (Top-K capture of critical cases,
+     NDCG@K) than count-only or condition-only heuristics?
+RQ4: Can uncertainty/confidence improve triage by routing low-confidence cases for manual review?
+
+1.2 Contributions (What is “new”)
+---------------------------------
+- A reproducible, open-source decision-support prototype with:
+  (a) Defect type + severity prediction from text,
+  (b) A unified priority scoring and ranking module across roads and bridges,
+  (c) Operations-style evaluation (Top-K capture and NDCG@K),
+  (d) A research-grade dataset preparation pipeline and experiment harness,
+  (e) Optional uncertainty-aware workflow and calibration reporting.
+
+1.3 Target Outputs for Paper
+----------------------------
+- Dataset summary table (counts, classes, time range, split policy).
+- Model results table (rules, TF-IDF, transformer) with macro-F1 and critical recall.
+- Ranking results table (heuristics vs text-aware ranking) with Top-K recall and NDCG@K.
+- Ablation table (remove text, remove severity, rules-only, etc.).
+- Error analysis section with categorized failure cases.
+- Tool screenshots and reproducibility instructions.
+
+================================
+2. DATA SOURCES & DATA CONTRACTS
+================================
+
+2.1 Road Dataset (Public)
+------------------------
+Dataset: NYC 311 Service Requests (2020–present) or similar public 311 datasets.
+Use cases:
+- Filter to road-related issues (potholes, street condition, road damage, roadway hazard, etc.).
+- Use text fields such as: complaint description, descriptor, resolution description (if available).
+- Use metadata fields: created date, closed date, location (zip/borough/lat-lon), agency, status.
+
+2.2 Bridge Dataset (Public)
+--------------------------
+Dataset: FHWA National Bridge Inventory (NBI) Element Data (structured).
+Use cases:
+- Use element condition states or ratings to derive bridge-level severity/criticality proxies.
+- Use optional metadata: route, location, year built, traffic, etc., if available.
+
+2.3 Data Governance / Ethics
+---------------------------
+- Use public data only by default; do NOT store personal identifiers.
+- Remove or hash any free-text that might include phone numbers/emails/names.
+- Provide a “data privacy” note in the README and a simple PII redaction module.
+
+2.4 Data Contracts (Schemas)
+----------------------------
+2.4.1 Road Record Schema (input to model)
+- record_id: string
+- created_at: datetime
+- closed_at: datetime (optional)
+- text: string (concatenated relevant text fields)
+- complaint_type: string (for weak labels / filtering)
+- descriptor: string (optional)
+- latitude: float (optional)
+- longitude: float (optional)
+- area_id: string (zip code or grid cell id)
+- status: string (optional)
+- resolution_time_hours: float (derived, optional)
+
+2.4.2 Bridge Record Schema (input to ranking)
+- bridge_id: string
+- inspection_year: int
+- element_states: dict or flattened numeric features
+- location: optional (state/county/lat-lon)
+- derived_severity: int/float (computed)
+- traffic_or_importance: optional (if available)
+
+2.4.3 Prediction Output Schema
+- record_id / asset_id
+- asset_type: road|bridge
+- predicted_defect: string (roads) or derived_condition_class (bridges)
+- predicted_severity: low|medium|high OR numeric severity score
+- confidence: float (0..1)
+- explanation: list of strings (top tokens/features) [optional but recommended]
+- priority_score: float
+- priority_rank: int
+
+================================
+3. SYSTEM OVERVIEW (TOOL FEATURES)
+================================
+
+3.1 Core Features (Must-have)
+-----------------------------
+F1. Data ingestion:
+    - Download/import NYC 311 dataset subset (CSV/Parquet).
+    - Import NBI element dataset (CSV/flat files).
+    - Validate schemas and produce cleaned datasets.
+
+F2. Preprocessing:
+    - Text cleaning: normalize whitespace, preserve numbers, minimal punctuation normalization.
+    - PII redaction: detect emails/phone numbers; replace with [REDACTED].
+    - Geospatial binning for roads: convert lat-lon to area_id (ZIP or grid).
+
+F3. Modeling:
+    - Baseline 1: rules/keywords for defect and severity cues.
+    - Baseline 2: TF-IDF + Logistic Regression.
+    - Model 3: transformer classifier (DistilBERT or similar), optional multi-task head for severity.
+    - Calibration option: temperature scaling or isotonic regression on validation.
+
+F4. Prioritization & Ranking:
+    - Roads: aggregate by area_id and time window (daily/weekly).
+      priority = alpha*recent_count + beta*avg_predicted_severity + gamma*repeat_rate + delta*uncertainty_penalty
+    - Bridges: severity derived from element states; priority = f(severity, importance/traffic if available).
+    - Ranking metrics: Top-K critical recall, NDCG@K, Spearman (optional).
+
+F5. Evaluation & Experiment Harness:
+    - Train/val/test splitting:
+      roads split by area_id or time (choose one, document it).
+      bridges split by bridge_id and/or year.
+    - Metrics:
+      classification macro-F1, per-class F1, critical recall;
+      ranking Top-K recall, NDCG@K.
+    - Ablation runner and output to /results.
+
+F6. Interactive Tool UI:
+    - Upload/choose dataset subset.
+    - Run predictions on a sample or batch.
+    - Display:
+      a) per-record predictions,
+      b) aggregate priority dashboard (top areas/bridges),
+      c) explanation snippets,
+      d) download results as CSV.
+
+F7. Reproducibility:
+    - Single-command runs for:
+      data prep, training, evaluation, and UI launch.
+    - Store configurations in YAML; log seed and versions.
+
+3.2 Nice-to-have Features (Optional)
+------------------------------------
+O1. Active learning:
+    - Suggest uncertain samples for labeling to improve performance with minimal labels.
+O2. Cross-city generalization:
+    - Train on one city dataset and test on another 311 dataset.
+O3. Map visualization:
+    - Heatmap of road priority zones; bridge points if coordinates exist.
+O4. Model cards:
+    - Document intended use, limitations, and known biases.
+
+================================
+4. USER STORIES (WHO USES IT)
+================================
+
+U1 (Researcher):
+- “I want to reproduce the full pipeline and generate all tables/figures for my paper.”
+
+U2 (Planner / Analyst):
+- “I want to upload a CSV of road complaints and get a ranked list of hotspot zones to inspect.”
+
+U3 (Reviewer):
+- “I want to see baselines, ablations, and proof that text improves ranking under a fixed budget K.”
+
+================================
+5. TECH STACK & DEPENDENCIES
+================================
+
+Language:
+- Python 3.11+
+
+Libraries:
+- Data: pandas, pyarrow, numpy
+- NLP: scikit-learn, transformers, torch, sentencepiece (if needed)
+- API: FastAPI, uvicorn
+- UI: Streamlit (recommended for speed) OR React frontend (optional)
+- Geospatial: geopy or h3 (optional), shapely (optional)
+- Experiment mgmt: pydantic, hydra or pyyaml
+- Testing: pytest
+- Lint/format: ruff + black
+- CI: GitHub Actions
+
+Hardware:
+- CPU works for TF-IDF baseline; GPU optional for transformer fine-tuning.
+- Tool must still run inference on CPU.
+
+================================
+6. REPOSITORY STRUCTURE (GITHUB)
+================================
+
+civinlp-triage/
+  README.md
+  LICENSE
+  CITATION.cff
+  .gitignore
+  pyproject.toml              (or requirements.txt)
+  configs/
+    default.yaml
+    roads.yaml
+    bridges.yaml
+  data_raw/                   (gitignored; contains download scripts only)
+    README.md
+  data_processed/             (gitignored)
+  notebooks/
+    01_explore_roads.ipynb
+    02_explore_bridges.ipynb
+    03_error_analysis.ipynb
+  src/
+    civinlp/
+      __init__.py
+      utils/
+        logging.py
+        seed.py
+        io.py
+        pii_redaction.py
+        text_clean.py
+      data/
+        download_roads_311.py
+        download_nbi.py
+        preprocess_roads.py
+        preprocess_bridges.py
+        split.py
+      labels/
+        taxonomy.py
+        weak_labeling.py
+      models/
+        baseline_rules.py
+        tfidf_lr.py
+        transformer.py
+        calibrate.py
+      ranking/
+        road_priority.py
+        bridge_priority.py
+        metrics.py
+      eval/
+        classification_metrics.py
+        ranking_metrics.py
+        ablation.py
+      api/
+        main.py               (FastAPI)
+        schemas.py
+      ui/
+        streamlit_app.py
+  scripts/
+    make_dataset.sh
+    train_baselines.sh
+    train_transformer.sh
+    evaluate_all.sh
+    run_api.sh
+    run_ui.sh
+  results/                    (generated; gitignored except sample outputs)
+    README.md
+  docs/
+    DATA_DICTIONARY.md
+    LABEL_GUIDE.md
+    MODEL_CARD.md
+    REPRODUCIBILITY.md
+    ETHICS_AND_LIMITATIONS.md
+  tests/
+    test_preprocess.py
+    test_models.py
+    test_ranking.py
+  .github/
+    workflows/
+      ci.yaml
+
+================================
+7. FUNCTIONAL REQUIREMENTS (DETAILED)
+================================
+
+7.1 Data Ingestion
+------------------
+R-ING-01: Provide a CLI command to download/select NYC 311 data subset OR load local CSV.
+R-ING-02: Provide a CLI command to load NBI element data from local files.
+R-ING-03: Validate required columns and produce a validation report (missing columns, null rates).
+
+7.2 Preprocessing
+-----------------
+R-PRE-01: Implement deterministic preprocessing with versioned configs.
+R-PRE-02: Implement PII redaction (emails, phones) on road complaint text.
+R-PRE-03: Create area_id for roads via ZIP if available, else create grid cell id.
+R-PRE-04: Output cleaned Parquet files for speed, plus a small sample CSV for quick runs.
+R-PRE-05: Provide a “data quality report” (duplicates, short-text ratio, top complaint types).
+
+7.3 Labeling
+------------
+R-LAB-01: Define a taxonomy for roads and bridges (documented in docs/LABEL_GUIDE.md).
+R-LAB-02: Derive weak labels for road defect type from complaint_type/descriptor mapping.
+R-LAB-03: Derive severity proxy for roads (configurable) such as:
+          (a) repeated complaints in same area within N days,
+          (b) long resolution time,
+          (c) keywords indicating danger.
+R-LAB-04: Derive bridge severity proxy from NBI element condition states (document mapping).
+
+7.4 Modeling
+------------
+R-MOD-01: Rules baseline:
+          - dictionary match for defect types and severity cue words.
+R-MOD-02: TF-IDF + Logistic Regression baseline:
+          - grid search for C; class_weight balanced option.
+R-MOD-03: Transformer classifier:
+          - fine-tune DistilBERT (or similar) with early stopping.
+          - support multi-task (defect + severity) or separate models.
+R-MOD-04: Save models with versioned filenames and metadata JSON (date, config, metrics).
+R-MOD-05: Inference should accept batch CSV and return predictions with confidence.
+
+7.5 Prioritization / Ranking
+----------------------------
+R-RNK-01: RoadPriority:
+          - aggregate by area_id and time window (daily/weekly).
+          - compute recent_count, repeat_rate, avg_pred_severity, avg_uncertainty.
+R-RNK-02: BridgePriority:
+          - compute bridge-level severity score from NBI element states.
+          - optionally incorporate importance signals if available.
+R-RNK-03: Output ranked lists:
+          - top areas (roads) and top bridges with rationales (top contributing factors).
+R-RNK-04: Provide operational simulation:
+          - “If you can inspect K zones/bridges, how many critical cases do you catch?”
+
+7.6 Evaluation
+--------------
+R-EVL-01: Classification metrics:
+          - macro-F1, per-class F1, confusion matrix, critical recall.
+R-EVL-02: Ranking metrics:
+          - Top-K recall of critical assets, NDCG@K, optionally Spearman correlation.
+R-EVL-03: Ablations:
+          - no-text vs text,
+          - no-severity vs severity,
+          - baseline vs transformer,
+          - with/without calibration.
+R-EVL-04: Error analysis helper:
+          - export top false positives/negatives and representative failure examples.
+
+7.7 Tool UI (Streamlit)
+-----------------------
+R-UI-01: Upload CSV or select prepared dataset sample.
+R-UI-02: Run prediction for selected subset (limit size for UI).
+R-UI-03: Show tables for:
+          - records with predicted defect/severity/confidence,
+          - top-K priority areas and bridges,
+          - explanation snippets (feature importance for TF-IDF; attention tokens optional).
+R-UI-04: Provide downloads:
+          - predictions CSV,
+          - ranking CSV,
+          - evaluation summary JSON.
+
+7.8 API (FastAPI)
+-----------------
+R-API-01: POST /predict/roads
+          Input: {records: [{record_id, text, created_at?, area_id?, ...}]}
+          Output: predictions list (defect, severity, confidence, explanation)
+R-API-02: POST /predict/bridges
+          Input: {records: [{bridge_id, element_states/features, ...}]}
+          Output: severity score and class
+R-API-03: POST /rank
+          Input: {road_predictions, bridge_severity, params:{K, window}}
+          Output: ranked lists and metrics (optional)
+R-API-04: GET /health
+
+================================
+8. NON-FUNCTIONAL REQUIREMENTS
+================================
+
+NFR-01: Reproducibility: same inputs + seed must produce same outputs.
+NFR-02: Performance: run TF-IDF inference for 10k road records < 60s on CPU (target).
+NFR-03: Transparency: show model confidence and basic explanation.
+NFR-04: Safety: tool is decision-support only; include disclaimer and limitations.
+NFR-05: Maintainability: typed configs, modular code, tests, CI.
+
+================================
+9. CONFIGURATION & CLI COMMANDS
+================================
+
+Provide a CLI (python -m civinlp ...) or Makefile targets:
+
+make dataset_roads
+  - downloads/loads 311, filters, cleans, outputs processed parquet
+
+make dataset_bridges
+  - loads NBI element data, builds severity features
+
+make train_baselines
+  - trains rules and TF-IDF models, saves to models/
+
+make train_transformer
+  - fine-tunes transformer model, saves to models/
+
+make evaluate
+  - runs classification + ranking evaluation and writes results/ tables
+
+make ui
+  - launches Streamlit tool
+
+make api
+  - launches FastAPI server
+
+All commands must write logs to logs/ with timestamp.
+
+================================
+10. EXPERIMENT DESIGN (RESEARCH HARNESS)
+================================
+
+10.1 Splits
+-----------
+Roads:
+- Option A (recommended for operational realism): time-based split
+  train: earliest 70%, val: next 10%, test: latest 20%
+- Option B: area-based split to test generalization across zones
+
+Bridges:
+- split by bridge_id to avoid leakage; optionally by inspection year.
+
+10.2 Metrics
+------------
+Classification:
+- macro-F1, per-class F1
+- critical recall (for High severity class)
+- calibration ECE (optional)
+
+Ranking:
+- Top-K recall of critical cases (define “critical” based on severity proxy)
+- NDCG@K
+- compare to heuristics:
+  H1: most complaints
+  H2: most recent complaints
+  H3: worst bridge condition only (bridges)
+
+10.3 Required Plots/Tables
+-------------------------
+- Confusion matrix heatmap
+- Precision/Recall per class bar chart
+- Top-K recall curve vs K
+- NDCG@K bar chart across methods
+- Ablation table
+- Example case study table: text -> predicted defect -> severity -> priority explanation
+
+================================
+11. TEST PLAN
+================================
+
+Unit Tests (pytest):
+- test_text_cleaning: stable output for known inputs
+- test_pii_redaction: emails/phones redacted
+- test_schema_validation: fails when required columns missing
+- test_model_inference_shapes: correct output schema
+- test_ranking_metrics: known toy ranking produces expected NDCG/TopK recall
+
+Integration Tests:
+- end-to-end run on a small sample (100 rows) completes and outputs results/
+- API health and predict endpoints respond
+
+================================
+12. DOCUMENTATION REQUIREMENTS
+================================
+
+README.md must include:
+- What the tool does (with screenshots)
+- Quickstart (CPU)
+- Research reproduction steps (to regenerate all paper results)
+- Data notes (how to obtain datasets, what is stored, what is not stored)
+- Limitations & responsible use disclaimer
+
+docs/:
+- DATA_DICTIONARY.md: fields used and derived fields
+- LABEL_GUIDE.md: defect taxonomy and severity definitions with examples
+- MODEL_CARD.md: intended use, metrics, caveats, biases
+- ETHICS_AND_LIMITATIONS.md: fairness, reporting bias, non-decision guarantee
+- REPRODUCIBILITY.md: exact commands, seeds, versions, expected outputs
+
+================================
+13. SECURITY / PRIVACY / ETHICS
+================================
+
+- Do not store raw PII. Apply redaction to text before saving processed data.
+- Provide a config flag to disable saving text and keep only embeddings/predictions.
+- Highlight reporting bias: some neighborhoods report more; tool may reflect that.
+- Clearly state: “This tool supports triage and does not replace engineering judgement.”
+
+================================
+14. LICENSING & CITATION
+================================
+
+- License: MIT or Apache-2.0 (recommended for academic tooling).
+- CITATION.cff file to enable GitHub citation.
+- If you release annotations, include a separate license/terms for them.
+
+================================
+15. MILESTONES (SUGGESTED)
+================================
+
+M1 (Week 1–2): Data ingestion + preprocessing + label taxonomy + baselines.
+M2 (Week 3–4): TF-IDF baseline + evaluation + initial ranking heuristics + UI skeleton.
+M3 (Week 5–6): Transformer model + ablations + confidence/calibration + improved ranking.
+M4 (Week 7–8): Robustness tests + error analysis + full documentation + paper figures.
+
+================================
+16. ACCEPTANCE CRITERIA (DONE DEFINITION)
+================================
+
+- Reproducible pipeline: a fresh clone can regenerate core results via documented commands.
+- Tool can ingest sample data and output:
+  predictions CSV + ranked priority CSV + evaluation summary JSON.
+- Paper-ready results exist in results/ with:
+  classification + ranking + ablation outputs.
+- UI shows top priority areas and bridges with downloadable outputs.
+- CI passes (lint + tests) on GitHub Actions.
+
+END OF SPEC
