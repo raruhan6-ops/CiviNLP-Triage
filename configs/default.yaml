@@ -1,0 +1,15 @@
+seed: 42
+log_level: INFO
+log_dir: logs
+
+paths:
+  data_raw: data_raw/
+  data_processed: data_processed/
+  models: models/
+  results: results/
+
+pipeline:
+  download_limit: 2000
+  skip_download: false
+  skip_training: false
+  train_transformer: false

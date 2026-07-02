@@ -34,4 +34,4 @@ def test_bridge_ranking():
     s1 = scorer.score_bridge(b1)
     s2 = scorer.score_bridge(b2)
     
-    assert s1 > s2 # B1 should be higher priority
+    assert s1['priority_score'] > s2['priority_score'] # B1 should be higher priority

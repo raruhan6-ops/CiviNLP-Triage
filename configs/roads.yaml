@@ -1,0 +1,43 @@
+# Road-specific configuration
+data:
+  source_url: "https://data.cityofnewyork.us/resource/erm2-nwe9.csv?$limit=2000&$order=created_date%20DESC"
+  raw_path: data_raw/roads_311.parquet
+  processed_path: data_processed/roads_processed.parquet
+
+preprocessing:
+  text_fields: ["complaint_type", "descriptor"]
+  pii_redaction: true
+  area_id_column: incident_zip
+
+split:
+  method: time  # "time" or "area"
+  train_frac: 0.7
+  val_frac: 0.1
+  test_frac: 0.2
+
+models:
+  tfidf:
+    max_features: 5000
+    stop_words: english
+  logistic_regression:
+    class_weight: balanced
+    max_iter: 1000
+    C: 1.0
+  transformer:
+    model_name: distilbert-base-uncased
+    max_length: 128
+    batch_size: 16
+    epochs: 3
+    learning_rate: 5.0e-5
+
+ranking:
+  alpha: 1.0   # count weight
+  beta: 2.0    # severity weight
+  gamma: 0.5   # repeat rate weight
+  delta: 1.0   # uncertainty penalty weight
+  time_window: null  # null, "D" (daily), "W" (weekly)
+
+severity:
+  method: keywords  # "keywords", "resolution_time", or "repeat_complaints"
+  high_keywords: ["collapse", "sinkhole", "cave", "hazard", "danger", "emergency", "flood", "major", "severe", "urgent", "impassable", "accident"]
+  medium_keywords: ["crack", "rough", "damage", "broken", "large", "deep", "multiple", "deteriorat", "erosion", "uneven", "bump"]

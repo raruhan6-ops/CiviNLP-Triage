@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CiviNLP Triage: Road & Bridge Maintenance Prioritization Tool"
+type: software
+authors:
+  - name: "CiviNLP Triage Contributors"
+version: "0.1.0"
+date-released: "2024-01-01"
+url: "https://github.com/YOUR_USERNAME/civinlp-triage"
+license: MIT
+keywords:
+  - NLP
+  - infrastructure
+  - maintenance
+  - prioritization
+  - decision-support
+  - road-maintenance
+  - bridge-inspection
+abstract: >-
+  An end-to-end, reproducible NLP decision-support tool that converts
+  public, real-world text records (e.g., citizen road complaints and
+  bridge condition data) into structured defect predictions and a
+  ranked maintenance priority list.

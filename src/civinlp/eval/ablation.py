@@ -1,68 +1,162 @@
 import pandas as pd
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
-from civinlp.models.transformer import TransformerClassifier
-from sklearn.metrics import classification_report, f1_score
+from civinlp.eval.classification_metrics import compute_classification_report
+from civinlp.data.split import time_based_split
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AblationRunner:
     """
     Runs experiments comparing different models/configurations.
+    Uses proper train/val/test splits and comprehensive metrics.
     """
-    def __init__(self, data_path: str):
+    def __init__(self, data_path: str, split_method: str = "time"):
         self.df = pd.read_parquet(data_path)
-        # Assuming we have a 'label' column. If not, we might need ground truth.
-        # For M4, we assume we have some labeled data (or use weak labels as proxy for demo).
-        # In a real scenario, this would load a test set with human labels.
-        # Here we'll simulate 'ground_truth' if not present, or use weak labels.
+
+        # Generate weak labels if not present
         if 'label' not in self.df.columns:
-            # Fallback for demo: use RuleBaseline as ground truth proxy if no manual labels
-            print("No 'label' column found. Generating proxy labels via Rules...")
+            logger.info("No 'label' column found. Generating proxy labels via Rules...")
             rule_model = RuleBaseline()
             preds = rule_model.predict(self.df['text'].fillna("").astype(str).tolist())
-            self.df['label'] = [str(p) for p in preds] # Very weak ground truth!
+            self.df['label'] = [str(p) for p in preds]
+
+        # Generate severity labels if not present
+        if 'severity_label' not in self.df.columns:
+            rule_model = RuleBaseline()
+            sev_preds = rule_model.predict_severity(self.df['text'].fillna("").astype(str).tolist())
+            self.df['severity_label'] = [str(s) for s in sev_preds]
+
+        # Split data
+        if split_method == "time" and "created_at" in self.df.columns:
+            try:
+                self.df['created_at'] = pd.to_datetime(self.df['created_at'], errors='coerce')
+                self.train_df, self.val_df, self.test_df = time_based_split(
+                    self.df, time_column="created_at"
+                )
+            except Exception as e:
+                logger.warning(f"Time-based split failed ({e}), falling back to sequential split.")
+                self._sequential_split()
+        else:
+            self._sequential_split()
+
+    def _sequential_split(self):
+        """Fallback: sequential 70/10/20 split."""
+        n = len(self.df)
+        t1 = int(n * 0.7)
+        t2 = int(n * 0.8)
+        self.train_df = self.df.iloc[:t1].copy()
+        self.val_df = self.df.iloc[t1:t2].copy()
+        self.test_df = self.df.iloc[t2:].copy()
+        logger.info(f"Sequential split: train={len(self.train_df)}, val={len(self.val_df)}, test={len(self.test_df)}")
 
     def run_baselines(self) -> pd.DataFrame:
         """
-        Compare Rule vs TF-IDF.
+        Compare Rule vs TF-IDF on the test set.
         """
         results = []
-        texts = self.df['text'].fillna("").astype(str).tolist()
-        y_true = self.df['label'].tolist()
-        
+        train_texts = self.train_df['text'].fillna("").astype(str).tolist()
+        train_labels = [str(l) for l in self.train_df['label'].tolist()]
+        test_texts = self.test_df['text'].fillna("").astype(str).tolist()
+        test_labels = [str(l) for l in self.test_df['label'].tolist()]
+
         # 1. Rules
+        logger.info("Evaluating Rule Baseline...")
         rule_model = RuleBaseline()
-        y_pred_rule = rule_model.predict(texts)
-        f1_rule = f1_score(y_true, y_pred_rule, average='macro', zero_division=0)
-        results.append({"Model": "RuleBaseline", "MacroF1": f1_rule})
-        
-        # 2. TF-IDF
-        # Train on a subset or split?
-        # For simplicity in this runner, we split train/test here.
-        train_size = int(0.8 * len(self.df))
-        train_texts = texts[:train_size]
-        train_labels = [str(l) for l in y_true[:train_size]]
-        test_texts = texts[train_size:]
-        test_labels = [str(l) for l in y_true[train_size:]]
-        
-        tfidf = TfidfBaseline()
+        y_pred_rule = [str(p) for p in rule_model.predict(test_texts)]
+        rule_report = compute_classification_report(test_labels, y_pred_rule)
+        results.append({
+            "Model": "RuleBaseline",
+            "MacroF1": rule_report["macro_f1"],
+            "CriticalRecall": rule_report.get("critical_recall"),
+        })
+
+        # 2. TF-IDF (defect)
+        logger.info("Training & evaluating TF-IDF Baseline (defect)...")
+        tfidf = TfidfBaseline(task="defect")
         tfidf.train(train_texts, train_labels)
         y_pred_tfidf = tfidf.predict(test_texts)
-        f1_tfidf = f1_score(test_labels, y_pred_tfidf, average='macro', zero_division=0)
-        results.append({"Model": "TF-IDF", "MacroF1": f1_tfidf})
-        
+        tfidf_report = compute_classification_report(test_labels, y_pred_tfidf)
+        results.append({
+            "Model": "TF-IDF (defect)",
+            "MacroF1": tfidf_report["macro_f1"],
+            "CriticalRecall": tfidf_report.get("critical_recall"),
+        })
+
+        # 3. TF-IDF (severity)
+        logger.info("Training & evaluating TF-IDF Baseline (severity)...")
+        train_severity = [str(l) for l in self.train_df['severity_label'].tolist()]
+        test_severity = [str(l) for l in self.test_df['severity_label'].tolist()]
+        tfidf_sev = TfidfBaseline(task="severity")
+        tfidf_sev.train(train_texts, train_severity)
+        y_pred_sev = tfidf_sev.predict(test_texts)
+        sev_report = compute_classification_report(test_severity, y_pred_sev, critical_class="high")
+        results.append({
+            "Model": "TF-IDF (severity)",
+            "MacroF1": sev_report["macro_f1"],
+            "CriticalRecall": sev_report.get("critical_recall"),
+        })
+
         return pd.DataFrame(results)
 
-    def run_transformer(self, model_path: str) -> Dict[str, float]:
+    def run_transformer(self, model_path: str) -> Dict[str, Any]:
         """
-        Evaluate a pre-trained transformer.
+        Evaluate a pre-trained transformer on the test set.
+
+        Args:
+            model_path: Path to the saved transformer model directory.
+
+        Returns:
+            Dict with model name and metrics.
         """
-        if not model_path:
-            return {}
-            
-        clf = TransformerClassifier.load(model_path)
-        texts = self.df['text'].fillna("").astype(str).tolist()
-        # Note: Transformer predicts indices, need to map back to labels if labels are strings
-        # Or map labels to indices.
-        # This requires consistent label mapping. Skipping detailed implementation for brevity.
-        return {"Model": "Transformer", "MacroF1": 0.0} # Placeholder
+        if not model_path or not Path(model_path).exists():
+            logger.warning(f"Transformer model not found at {model_path}")
+            return {"Model": "Transformer", "MacroF1": None, "CriticalRecall": None}
+
+        try:
+            from civinlp.models.transformer import TransformerClassifier
+            clf = TransformerClassifier.load(model_path)
+
+            test_texts = self.test_df['text'].fillna("").astype(str).tolist()
+            test_labels = [str(l) for l in self.test_df['label'].tolist()]
+
+            if clf.index_map:
+                y_pred = clf.predict_labels(test_texts)
+            else:
+                # Fallback: use integer predictions as strings
+                y_pred = [str(p) for p in clf.predict(test_texts)]
+
+            report = compute_classification_report(test_labels, y_pred)
+            return {
+                "Model": "Transformer",
+                "MacroF1": report["macro_f1"],
+                "CriticalRecall": report.get("critical_recall"),
+            }
+        except Exception as e:
+            logger.error(f"Transformer evaluation failed: {e}")
+            return {"Model": "Transformer", "MacroF1": None, "Error": str(e)}
+
+    def run_all(self, transformer_path: Optional[str] = None) -> pd.DataFrame:
+        """
+        Run all ablations and return combined results.
+
+        Args:
+            transformer_path: Optional path to transformer model.
+
+        Returns:
+            DataFrame with all model results.
+        """
+        results_df = self.run_baselines()
+
+        if transformer_path:
+            transformer_result = self.run_transformer(transformer_path)
+            results_df = pd.concat(
+                [results_df, pd.DataFrame([transformer_result])],
+                ignore_index=True,
+            )
+
+        return results_df

@@ -1,0 +1,31 @@
+# Bridge-specific configuration
+data:
+  raw_path: data_raw/bridges_nbi.parquet
+  processed_path: data_processed/bridges_processed.parquet
+
+schema:
+  id_column: STRUCTURE_NUMBER_008
+  rating_columns:
+    - DECK_COND_058
+    - SUPERSTRUCTURE_COND_059
+    - SUBSTRUCTURE_COND_060
+  traffic_column: ADT_029
+  year_column: YEAR_BUILT_027
+  location_columns:
+    - STATE_CODE_001
+    - COUNTY_CODE_003
+    - LAT_016
+    - LONG_017
+
+severity:
+  method: worst_rating  # "worst_rating", "average_rating"
+  rating_scale: 9  # NBI: 9=Excellent, 0=Failed
+
+ranking:
+  severity_weight: 1.0
+  traffic_weight: 0.5
+
+split:
+  method: bridge_id  # split by bridge_id to avoid leakage
+  test_frac: 0.2
+  val_frac: 0.1

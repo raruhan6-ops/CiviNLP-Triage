@@ -1,0 +1,61 @@
+"""
+Centralized logging configuration for CiviNLP Triage.
+
+Provides structured logging to both console and timestamped log files.
+Import and call setup_logging() at the entry point of any script.
+"""
+
+import logging
+import sys
+from pathlib import Path
+from datetime import datetime
+
+
+def setup_logging(
+    log_dir: str = "logs",
+    level: int = logging.INFO,
+    name: str = "civinlp",
+) -> logging.Logger:
+    """
+    Configure logging with console and file handlers.
+
+    Args:
+        log_dir: Directory to store log files.
+        level: Logging level (default INFO).
+        name: Logger name / log file prefix.
+
+    Returns:
+        Configured root logger.
+    """
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_path / f"{name}_{timestamp}.log"
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Avoid duplicate handlers on repeated calls
+    if not root_logger.handlers:
+        root_logger.addHandler(console_handler)
+        root_logger.addHandler(file_handler)
+
+    logging.getLogger(__name__).info(f"Logging initialized. Log file: {log_file}")
+    return root_logger

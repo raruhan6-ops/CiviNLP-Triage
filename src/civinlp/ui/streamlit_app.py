@@ -3,6 +3,7 @@ import pandas as pd
 from pathlib import Path
 import os
 import sys
+import io
 
 # Add src to path if needed (for local dev)
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../'))
@@ -10,54 +11,208 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../../'))
 from civinlp.data.download_roads_311 import download_roads_311
 from civinlp.data.preprocess_roads import preprocess_roads
 from civinlp.ranking.road_priority import RoadPriorityScorer
+from civinlp.models.baseline_rules import RuleBaseline
+from civinlp.models.tfidf_lr import TfidfBaseline
 from civinlp.utils.io import load_parquet
 
-st.set_page_config(page_title="CiviNLP Triage", layout="wide")
+st.set_page_config(page_title="CiviNLP Triage", layout="wide", page_icon="🏗️")
 
-st.title("CiviNLP Triage: Maintenance Prioritization")
+st.title("🏗️ CiviNLP Triage: Maintenance Prioritization")
+st.markdown("*Intelligent road & bridge maintenance prioritization using NLP*")
 
-st.sidebar.header("Data Loading")
-data_source = st.sidebar.radio("Source", ["Use Sample Data", "Upload CSV"])
+# ─── Sidebar ──────────────────────────────────────────────────────────────────
+
+st.sidebar.header("⚙️ Configuration")
+data_source = st.sidebar.radio("Data Source", ["Use Sample Data", "Upload CSV"])
+model_choice = st.sidebar.selectbox(
+    "Model",
+    ["TF-IDF + Logistic Regression", "Rule Baseline"],
+)
+
+
+# ─── Data Loading ─────────────────────────────────────────────────────────────
 
 @st.cache_data
-def load_data():
-    # Helper to get sample data
-    # In a real app, this would be robust.
+def load_sample_data():
+    """Load or download sample data."""
     raw_path = "data_raw/roads_311.parquet"
     proc_path = "data_processed/roads_processed.parquet"
-    
+
     if not Path(raw_path).exists():
-        st.info("Downloading sample data...")
         download_roads_311(raw_path, limit=500)
-        
+
     if not Path(proc_path).exists():
-        st.info("Preprocessing data...")
         preprocess_roads(raw_path, proc_path)
-        
+
     return load_parquet(proc_path)
 
+
+def load_model(choice: str):
+    """Load the selected model."""
+    if choice == "TF-IDF + Logistic Regression":
+        model_path = Path("models/tfidf_baseline.joblib")
+        if model_path.exists():
+            return TfidfBaseline.load(model_path)
+        else:
+            st.warning("TF-IDF model not found. Falling back to Rule Baseline.")
+            return RuleBaseline()
+    return RuleBaseline()
+
+
+# ─── Main Flow ────────────────────────────────────────────────────────────────
+
 if data_source == "Use Sample Data":
-    if st.sidebar.button("Load/Refresh Data"):
+    if st.sidebar.button("🔄 Load/Refresh Data"):
         try:
-            df = load_data()
+            df = load_sample_data()
             st.session_state['df'] = df
-            st.success("Data loaded!")
+            st.success(f"✅ Loaded {len(df)} records from sample data.")
         except Exception as e:
             st.error(f"Error loading data: {e}")
-            
+
+elif data_source == "Upload CSV":
+    uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            # Ensure 'text' column exists
+            if 'text' not in df.columns:
+                text_cols = [c for c in df.columns if 'complaint' in c.lower() or 'text' in c.lower() or 'descriptor' in c.lower()]
+                if text_cols:
+                    df['text'] = df[text_cols].fillna("").astype(str).agg(" - ".join, axis=1)
+                else:
+                    st.error("CSV must have a 'text' column or complaint-related columns.")
+                    st.stop()
+            if 'area_id' not in df.columns:
+                for col in ['incident_zip', 'zip', 'zip_code', 'area']:
+                    if col in df.columns:
+                        df['area_id'] = df[col].fillna('UNKNOWN').astype(str)
+                        break
+                else:
+                    df['area_id'] = 'UNKNOWN'
+            st.session_state['df'] = df
+            st.success(f"✅ Uploaded {len(df)} records.")
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+
+
+# ─── Display Data & Predictions ──────────────────────────────────────────────
+
 if "df" in st.session_state:
     df = st.session_state['df']
-    st.subheader("Road Complaints")
-    st.write(f"Loaded {len(df)} records.")
-    st.dataframe(df.head())
-    
-    st.subheader("Analysis")
-    if st.button("Run Priority Scoring"):
-        scorer = RoadPriorityScorer()
-        ranked = scorer.rank_areas(df)
-        st.write("Top Priority Areas")
-        st.dataframe(ranked)
-        
-        st.bar_chart(ranked.set_index("area_id")['priority_score'].head(20))
+
+    tab1, tab2, tab3 = st.tabs(["📋 Data", "🔍 Predictions", "📊 Priority Ranking"])
+
+    # ── Tab 1: Data Overview ──
+    with tab1:
+        st.subheader("Road Complaints")
+        st.write(f"**{len(df)}** records loaded.")
+        st.dataframe(df.head(50), use_container_width=True)
+
+    # ── Tab 2: Per-Record Predictions ──
+    with tab2:
+        st.subheader("Per-Record Predictions")
+        if st.button("🚀 Run Predictions"):
+            model = load_model(model_choice)
+            texts = df['text'].fillna("").astype(str).tolist()
+
+            with st.spinner("Running predictions..."):
+                # Defect predictions
+                defect_preds = [str(p) for p in model.predict(texts)]
+
+                # Severity predictions
+                rule_model = RuleBaseline()
+                severity_preds = [str(s) for s in rule_model.predict_severity(texts)]
+
+                # Confidence
+                if hasattr(model, "predict_proba"):
+                    try:
+                        proba = model.predict_proba(texts)
+                        confidences = [round(float(max(row)), 3) for row in proba]
+                    except Exception:
+                        confidences = [1.0] * len(texts)
+                else:
+                    confidences = [1.0] * len(texts)
+
+            pred_df = df.copy()
+            pred_df['predicted_defect'] = defect_preds
+            pred_df['predicted_severity'] = severity_preds
+            pred_df['confidence'] = confidences
+            st.session_state['pred_df'] = pred_df
+
+            st.success("Predictions complete!")
+
+        if 'pred_df' in st.session_state:
+            pred_df = st.session_state['pred_df']
+
+            # Display columns
+            display_cols = ['text', 'predicted_defect', 'predicted_severity', 'confidence']
+            display_cols = [c for c in display_cols if c in pred_df.columns]
+            st.dataframe(pred_df[display_cols].head(100), use_container_width=True)
+
+            # Summary stats
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Defect Distribution**")
+                st.bar_chart(pred_df['predicted_defect'].value_counts())
+            with col2:
+                st.write("**Severity Distribution**")
+                st.bar_chart(pred_df['predicted_severity'].value_counts())
+
+            # Explanation snippets (TF-IDF features)
+            if model_choice == "TF-IDF + Logistic Regression":
+                model_path = Path("models/tfidf_baseline.joblib")
+                if model_path.exists():
+                    try:
+                        loaded_model = TfidfBaseline.load(model_path)
+                        top_features = loaded_model.get_top_features(n=5)
+                        st.write("**Top TF-IDF Features per Class**")
+                        for cls, features in top_features.items():
+                            st.write(f"- **{cls}**: {', '.join(features)}")
+                    except Exception:
+                        pass
+
+            # Download predictions
+            st.subheader("📥 Download")
+            csv_buffer = io.StringIO()
+            pred_df.to_csv(csv_buffer, index=False)
+            st.download_button(
+                label="Download Predictions CSV",
+                data=csv_buffer.getvalue(),
+                file_name="civinlp_predictions.csv",
+                mime="text/csv",
+            )
+
+    # ── Tab 3: Priority Ranking ──
+    with tab3:
+        st.subheader("Area Priority Ranking")
+
+        if 'pred_df' not in st.session_state:
+            st.info("Run predictions first (tab 2) to generate rankings.")
+        else:
+            pred_df = st.session_state['pred_df']
+            if 'area_id' in pred_df.columns:
+                scorer = RoadPriorityScorer()
+                ranked = scorer.rank_areas(pred_df)
+                st.write(f"**{len(ranked)}** areas ranked.")
+                st.dataframe(ranked, use_container_width=True)
+
+                # Bar chart of top areas
+                top_n = min(20, len(ranked))
+                chart_data = ranked.head(top_n).set_index("area_id")['priority_score']
+                st.bar_chart(chart_data)
+
+                # Download rankings
+                csv_buffer = io.StringIO()
+                ranked.to_csv(csv_buffer, index=False)
+                st.download_button(
+                    label="Download Rankings CSV",
+                    data=csv_buffer.getvalue(),
+                    file_name="civinlp_rankings.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.warning("No 'area_id' column found for area-level ranking.")
+
 else:
-    st.info("Please load data to begin.")
+    st.info("👈 Select a data source and load data to begin.")
