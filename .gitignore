@@ -40,6 +40,6 @@ logs/
 *.log
 
 # Models
-models/
+/models/
 *.pt
 *.bin
