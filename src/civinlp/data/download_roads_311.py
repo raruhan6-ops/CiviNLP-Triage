@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import logging
+import time
 
 from civinlp.utils.io import save_parquet, load_csv
 from civinlp.data.schema import RawRoadSchema, ROAD_COMPLAINT_TYPES
@@ -13,10 +14,16 @@ logger = logging.getLogger(__name__)
 
 NYC_311_RESOURCE = "https://data.cityofnewyork.us/resource/erm2-nwe9.csv"
 DEFAULT_LIMIT = 2000
+SELECT_COLUMNS = [
+    "unique_key", "created_date", "closed_date", "status", "complaint_type",
+    "descriptor", "incident_zip", "borough", "latitude", "longitude",
+]
 
 
 def build_311_url(
-    base_url: str = NYC_311_RESOURCE, limit: Optional[int] = DEFAULT_LIMIT
+    base_url: str = NYC_311_RESOURCE,
+    limit: Optional[int] = DEFAULT_LIMIT,
+    offset: Optional[int] = None,
 ) -> str:
     """
     Build a Socrata query URL restricted to road-related complaint types.
@@ -29,15 +36,47 @@ def build_311_url(
     if "$where" not in params:
         types = ",".join(f"'{t}'" for t in ROAD_COMPLAINT_TYPES)
         params["$where"] = f"complaint_type in({types})"
-    params.setdefault("$order", "created_date DESC")
+    # Full rows have ~40 columns; large pulls get cut off without a narrower select
+    params.setdefault("$select", ",".join(SELECT_COLUMNS))
+    # unique_key breaks ties so paging with $offset is stable
+    params.setdefault("$order", "created_date DESC,unique_key DESC")
     if limit:
         params["$limit"] = str(limit)
+    if offset:
+        params["$offset"] = str(offset)
     query = urlencode(params, quote_via=quote, safe="$,'()")
     return urlunsplit(parts._replace(query=query))
 
 
 # Default URL: latest road-related NYC 311 requests
 NYC_311_URL = build_311_url()
+PAGE_SIZE = 5000
+
+
+def read_socrata_paged(
+    base_url: str, limit: int, page_size: Optional[int] = None, retries: int = 3, **read_kwargs
+) -> pd.DataFrame:
+    """Fetch up to `limit` rows in pages; large single responses tend to get cut off."""
+    page_size = page_size or PAGE_SIZE
+    pages, offset = [], 0
+    while offset < limit:
+        n = min(page_size, limit - offset)
+        url = build_311_url(base_url, n, offset)
+        for attempt in range(1, retries + 1):
+            try:
+                page = pd.read_csv(url, **read_kwargs)
+                break
+            except Exception as e:
+                if attempt == retries:
+                    raise
+                logger.warning(f"Page at offset {offset} failed ({e}); retry {attempt}/{retries - 1}")
+                time.sleep(2 * attempt)
+        pages.append(page)
+        logger.info(f"Fetched {offset + len(page)} rows")
+        if len(page) < n:
+            break
+        offset += n
+    return pd.concat(pages, ignore_index=True) if pages else pd.DataFrame()
 
 
 def download_roads_311(output_path: str, source_url_or_path: Optional[str] = None, limit: Optional[int] = None):
@@ -52,8 +91,7 @@ def download_roads_311(output_path: str, source_url_or_path: Optional[str] = Non
     source = source_url_or_path or NYC_311_RESOURCE
     is_url = source.startswith(("http://", "https://"))
 
-    if is_url and "data.cityofnewyork.us/resource/" in source:
-        source = build_311_url(source, limit or DEFAULT_LIMIT)
+    is_socrata = is_url and "data.cityofnewyork.us/resource/" in source
 
     logger.info(f"Fetching data from {source}...")
 
@@ -63,7 +101,10 @@ def download_roads_311(output_path: str, source_url_or_path: Optional[str] = Non
     if limit and not is_url:
         read_kwargs["nrows"] = limit
     try:
-        df = pd.read_csv(source, **read_kwargs)
+        if is_socrata:
+            df = read_socrata_paged(source, limit or DEFAULT_LIMIT, **read_kwargs)
+        else:
+            df = pd.read_csv(source, **read_kwargs)
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
         raise

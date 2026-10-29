@@ -5,11 +5,13 @@ import os
 import sys
 import io
 
-# Add src to path if needed (for local dev)
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../../'))
+# Add src/ to path if needed (for local dev without `pip install -e .`)
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 
 from civinlp.data.download_roads_311 import download_roads_311
-from civinlp.data.preprocess_roads import preprocess_roads
+from civinlp.data.preprocess_roads import preprocess_roads, normalize_zip
+from civinlp.data.preprocess_bridges import clean_bridges
+from civinlp.ranking.bridge_priority import BridgePriorityScorer
 from civinlp.ranking.road_priority import RoadPriorityScorer
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
@@ -23,6 +25,47 @@ st.markdown("*Intelligent road & bridge maintenance prioritization using NLP*")
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.header("⚙️ Configuration")
+asset_type = st.sidebar.radio("Asset", ["Roads", "Bridges"])
+
+
+# ─── Bridges ──────────────────────────────────────────────────────────────────
+
+def show_bridges():
+    """Rank bridges from an NBI CSV upload or the processed bridge file."""
+    st.subheader("Bridge Priority Ranking (NBI condition ratings)")
+    proc_path = Path("data_processed/bridges_processed.parquet")
+    uploaded = st.sidebar.file_uploader("Upload NBI CSV", type=["csv"], key="nbi_upload")
+
+    if uploaded is not None:
+        bridges = clean_bridges(pd.read_csv(uploaded, dtype=str, encoding="latin1"))
+    elif proc_path.exists():
+        bridges = load_parquet(proc_path)
+    else:
+        st.info("👈 Upload an NBI CSV (from FHWA), or run "
+                "`python -m civinlp.data.preprocess_bridges` first.")
+        return
+
+    traffic_weight = st.sidebar.slider("Traffic weight", 0.0, 2.0, 0.5, 0.1)
+    ranked = BridgePriorityScorer(traffic_weight=traffic_weight).rank_bridges(bridges)
+
+    n_missing = int(ranked.get("all_ratings_missing", pd.Series(dtype=bool)).sum())
+    st.write(f"**{len(ranked)}** bridges ranked.")
+    if n_missing:
+        st.warning(f"{n_missing} bridges have no usable condition rating (severity shown as 0).")
+    st.dataframe(ranked, width="stretch")
+    st.bar_chart(ranked.head(20).set_index("bridge_id")["priority_score"])
+    st.download_button(
+        label="Download Bridge Rankings CSV",
+        data=ranked.to_csv(index=False),
+        file_name="civinlp_bridge_rankings.csv",
+        mime="text/csv",
+    )
+
+
+if asset_type == "Bridges":
+    show_bridges()
+    st.stop()
+
 data_source = st.sidebar.radio("Data Source", ["Use Sample Data", "Upload CSV"])
 model_choice = st.sidebar.selectbox(
     "Model",
@@ -86,7 +129,7 @@ elif data_source == "Upload CSV":
             if 'area_id' not in df.columns:
                 for col in ['incident_zip', 'zip', 'zip_code', 'area']:
                     if col in df.columns:
-                        df['area_id'] = df[col].fillna('UNKNOWN').astype(str)
+                        df['area_id'] = df[col].map(normalize_zip)
                         break
                 else:
                     df['area_id'] = 'UNKNOWN'
@@ -107,7 +150,7 @@ if "df" in st.session_state:
     with tab1:
         st.subheader("Road Complaints")
         st.write(f"**{len(df)}** records loaded.")
-        st.dataframe(df.head(50), use_container_width=True)
+        st.dataframe(df.head(50), width="stretch")
 
     # ── Tab 2: Per-Record Predictions ──
     with tab2:
@@ -148,7 +191,7 @@ if "df" in st.session_state:
             # Display columns
             display_cols = ['text', 'predicted_defect', 'predicted_severity', 'confidence']
             display_cols = [c for c in display_cols if c in pred_df.columns]
-            st.dataframe(pred_df[display_cols].head(100), use_container_width=True)
+            st.dataframe(pred_df[display_cols].head(100), width="stretch")
 
             # Summary stats
             col1, col2 = st.columns(2)
@@ -195,7 +238,7 @@ if "df" in st.session_state:
                 scorer = RoadPriorityScorer()
                 ranked = scorer.rank_areas(pred_df)
                 st.write(f"**{len(ranked)}** areas ranked.")
-                st.dataframe(ranked, use_container_width=True)
+                st.dataframe(ranked, width="stretch")
 
                 # Bar chart of top areas
                 top_n = min(20, len(ranked))

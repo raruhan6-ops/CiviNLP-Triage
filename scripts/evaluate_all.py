@@ -7,13 +7,51 @@ from pathlib import Path
 
 from civinlp.eval.ablation import AblationRunner
 from civinlp.eval.error_analysis import get_top_errors, generate_error_report
-from civinlp.eval.ranking_metrics import top_k_recall, ndcg_at_k, top_k_recall_curve
+from civinlp.eval.classification_metrics import compute_classification_report
+from civinlp.eval.outcome_eval import run_outcome_evaluation
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
-from civinlp.ranking.road_priority import RoadPriorityScorer
 from civinlp.utils.seed import set_global_seed
 
 logger = logging.getLogger(__name__)
+
+
+def evaluate_against_gold(runner, tfidf, gold_path):
+    """
+    Compare rule and TF-IDF predictions with hand labels.
+
+    The gold CSV needs a `record_id` column plus `defect` and/or `severity` columns.
+    Only gold rows NOT in the TF-IDF training split are scored.
+    """
+    gold = pd.read_csv(gold_path, dtype={"record_id": str})
+    if "record_id" not in gold.columns or "record_id" not in runner.df.columns:
+        print("Gold file and data both need a 'record_id' column; skipping.")
+        return None
+
+    train_ids = set(runner.train_df["record_id"].astype(str))
+    df = runner.df.assign(record_id=runner.df["record_id"].astype(str))
+    merged = gold.merge(df[["record_id", "text"]], on="record_id", how="inner")
+    merged = merged[~merged["record_id"].isin(train_ids)]
+    if merged.empty:
+        print("No gold rows outside the training split; skipping.")
+        return None
+
+    texts = merged["text"].fillna("").astype(str).tolist()
+    rules = RuleBaseline()
+    rows = []
+    if "defect" in merged.columns:
+        y_true = merged["defect"].astype(str).str.lower().tolist()
+        for name, preds in [("RuleBaseline", [p.value for p in rules.predict(texts)]),
+                            ("TF-IDF (defect)", tfidf.predict(texts))]:
+            rep = compute_classification_report(y_true, [str(p) for p in preds], critical_class=None)
+            rows.append({"Task": "defect", "Model": name, "n": len(y_true), "MacroF1": rep["macro_f1"]})
+    if "severity" in merged.columns:
+        y_true = merged["severity"].astype(str).str.lower().tolist()
+        preds = [s.value for s in rules.predict_severity(texts)]
+        rep = compute_classification_report(y_true, preds, critical_class="high")
+        rows.append({"Task": "severity", "Model": "RuleBaseline", "n": len(y_true),
+                     "MacroF1": rep["macro_f1"], "CriticalRecall": rep["critical_recall"]})
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -22,6 +60,10 @@ def main():
     parser.add_argument("--output_dir", default="results/")
     parser.add_argument("--transformer_path", default="models/distilbert_finetuned")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--gold", default=None,
+                        help="Optional hand-labelled CSV (record_id, defect, severity)")
+    parser.add_argument("--history_frac", type=float, default=0.5,
+                        help="Fraction of the time range used as ranking history")
     args = parser.parse_args()
 
     set_global_seed(args.seed)
@@ -64,46 +106,44 @@ def main():
     generate_error_report(errors, os.path.join(args.output_dir, "error_analysis.csv"))
 
     # ============================================================
-    # 3. Ranking Evaluation
+    # 3. Gold-label Classification (independent of the rules)
     # ============================================================
-    print("\n=== Running Ranking Evaluation ===")
-    df = runner.test_df.copy()
+    gold_results = None
+    if args.gold:
+        print("\n=== Evaluating against hand labels ===")
+        gold_results = evaluate_against_gold(runner, tfidf, args.gold)
+        if gold_results is not None:
+            print(gold_results.to_string(index=False))
+            gold_results.to_csv(os.path.join(args.output_dir, "gold_results.csv"), index=False)
 
-    # Add predictions to test data for ranking
-    df['predicted_defect'] = y_pred_tfidf
+    # ============================================================
+    # 4. Ranking Evaluation (future outcomes, not rule labels)
+    # ============================================================
+    print("\n=== Running Outcome-based Ranking Evaluation ===")
+    df = runner.df.copy()
     rule_model = RuleBaseline()
-    df['predicted_severity'] = [str(s) for s in rule_model.predict_severity(test_texts)]
+    df['predicted_severity'] = [
+        str(s.value) for s in rule_model.predict_severity(df['text'].fillna("").astype(str).tolist())
+    ]
 
-    # Score and rank areas
-    scorer = RoadPriorityScorer()
-    if 'area_id' in df.columns:
-        ranked = scorer.rank_areas(df)
-        ranked_ids = ranked['area_id'].tolist()
-
-        # Define "critical" areas (those with any HIGH severity complaint)
-        critical_areas = set(
-            df[df['predicted_severity'] == 'high']['area_id'].unique()
-        ) if 'predicted_severity' in df.columns else set()
-
-        if critical_areas and len(ranked_ids) > 0:
-            k_values = [k for k in [3, 5, 10] if k <= len(ranked_ids)]
-            recall_curve = top_k_recall_curve(ranked_ids, critical_areas, k_values=k_values)
-            print(f"Top-K Recall: {recall_curve}")
-
-            # NDCG (using priority scores as relevance)
-            relevance = dict(zip(ranked['area_id'], ranked['priority_score']))
-            for k in k_values:
-                ndcg = ndcg_at_k(ranked_ids, relevance, k)
-                print(f"NDCG@{k}: {ndcg:.4f}")
-        else:
-            recall_curve = {}
-            print("No critical areas found for ranking evaluation.")
+    ranking_results, ranking_info = None, {}
+    if 'area_id' in df.columns and 'created_at' in df.columns:
+        try:
+            ranking_results, ranking_info = run_outcome_evaluation(
+                df, history_frac=args.history_frac, seed=args.seed
+            )
+            print(f"Ground truth: {ranking_info['relevance']}")
+            print(f"Cutoff {ranking_info['cutoff']}, {ranking_info['rankable_areas']} rankable areas, "
+                  f"{ranking_info['critical_areas']} critical")
+            print(ranking_results.to_string(index=False))
+            ranking_results.to_csv(os.path.join(args.output_dir, "ranking_results.csv"), index=False)
+        except ValueError as e:
+            print(f"Skipping ranking evaluation: {e}")
     else:
-        recall_curve = {}
-        print("No area_id column; skipping ranking evaluation.")
+        print("Need 'area_id' and 'created_at' columns; skipping ranking evaluation.")
 
     # ============================================================
-    # 4. Summary JSON
+    # 5. Summary JSON
     # ============================================================
     summary = {
         "seed": args.seed,
@@ -111,8 +151,14 @@ def main():
         "train_size": len(runner.train_df),
         "val_size": len(runner.val_df),
         "test_size": len(runner.test_df),
-        "ablation_results": results.to_dict(orient="records"),
-        "top_k_recall": {str(k): v for k, v in recall_curve.items()} if recall_curve else {},
+        # Measured against rule-generated weak labels: shows agreement with the
+        # rules, not real-world accuracy. See gold_results for that.
+        "weak_label_agreement": results.to_dict(orient="records"),
+        "gold_results": gold_results.to_dict(orient="records") if gold_results is not None else None,
+        "ranking_outcome_eval": {
+            **ranking_info,
+            "results": ranking_results.to_dict(orient="records") if ranking_results is not None else [],
+        },
         "error_count": len(errors),
     }
 

@@ -129,3 +129,49 @@ def area_based_split(
         f"test={len(test_df)} (test_areas={test_areas})"
     )
     return train_df, val_df, test_df
+
+
+def group_split(
+    df: pd.DataFrame,
+    group_column: str,
+    test_frac: float = 0.2,
+    val_frac: float = 0.1,
+    seed: int = 42,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split by whole groups: `test_frac` / `val_frac` are fractions of GROUPS,
+    so every row of a group lands in exactly one split.
+
+    Use for bridges (group_column="bridge_id", so repeated inspections of one
+    bridge never leak across splits) or for zones (group_column="area_id").
+    """
+    if group_column not in df.columns:
+        raise ValueError(f"Column '{group_column}' not found in DataFrame")
+    if test_frac + val_frac >= 1.0:
+        raise ValueError("test_frac + val_frac must be < 1.0")
+
+    import numpy as np
+    rng = np.random.RandomState(seed)
+    groups = rng.permutation(sorted(df[group_column].astype(str).unique()))
+    n_test = int(round(len(groups) * test_frac))
+    n_val = int(round(len(groups) * val_frac))
+    if len(groups) - n_test - n_val < 1:
+        raise ValueError(f"Too few groups ({len(groups)}) for the requested split")
+
+    test_groups = set(groups[:n_test])
+    val_groups = set(groups[n_test:n_test + n_val])
+    keys = df[group_column].astype(str)
+    test_df = df[keys.isin(test_groups)].copy()
+    val_df = df[keys.isin(val_groups)].copy()
+    train_df = df[~keys.isin(test_groups | val_groups)].copy()
+
+    logger.info(
+        f"Group split on '{group_column}': train={len(train_df)}, val={len(val_df)}, "
+        f"test={len(test_df)} ({n_test} test / {n_val} val groups)"
+    )
+    return train_df, val_df, test_df
+
+
+def bridge_split(df: pd.DataFrame, test_frac: float = 0.2, val_frac: float = 0.1, seed: int = 42):
+    """Split bridge records by bridge_id (see configs/bridges.yaml)."""
+    return group_split(df, "bridge_id", test_frac=test_frac, val_frac=val_frac, seed=seed)

@@ -1,6 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
-class RoadDefectClass(str, Enum):
+# StrEnum so str(RoadSeverity.HIGH) == "high" (a plain (str, Enum) gives
+# "RoadSeverity.HIGH", which silently broke string-based lookups downstream).
+
+class RoadDefectClass(StrEnum):
     POTHOLE = "pothole"
     CRACKING = "cracking"
     STREET_CONDITION = "street_condition"
@@ -8,7 +11,7 @@ class RoadDefectClass(str, Enum):
     SIGNAGE = "signage"
     OTHER = "other"
 
-class RoadSeverity(str, Enum):
+class RoadSeverity(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"

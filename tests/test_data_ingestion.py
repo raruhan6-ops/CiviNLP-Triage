@@ -65,7 +65,7 @@ def test_build_311_url_filters_roads_and_sets_limit():
     params = parse_qs(urlsplit(build_311_url(NYC_311_RESOURCE, 500)).query)
     assert params["$limit"] == ["500"]
     assert "'Street Condition'" in params["$where"][0]
-    assert params["$order"] == ["created_date DESC"]
+    assert params["$order"] == ["created_date DESC,unique_key DESC"]
 
     # An existing $limit is overridden, other params kept, and no stray "&"
     url = build_311_url(NYC_311_RESOURCE + "?$limit=2000&borough=BRONX", 50)
@@ -99,3 +99,23 @@ def test_area_split_with_explicit_test_areas():
     assert len(test) == 8
     assert len(val) == 1 and len(train) == 1
     assert set(train["area_id"]) == {"B"}
+
+
+def test_socrata_download_is_paged(tmp_path, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    import civinlp.data.download_roads_311 as mod
+
+    calls = []
+
+    def mock_read_csv(url, **kwargs):
+        q = parse_qs(urlsplit(url).query)
+        calls.append((int(q["$limit"][0]), int(q.get("$offset", ["0"])[0])))
+        n = int(q["$limit"][0]) if len(calls) < 3 else 1  # third page is short
+        return pd.DataFrame({"unique_key": [str(len(calls))] * n, "created_date": ["2023-01-01"] * n,
+                             "complaint_type": ["Street Condition"] * n})
+
+    monkeypatch.setattr(pd, "read_csv", mock_read_csv)
+    monkeypatch.setattr(mod, "PAGE_SIZE", 4)
+    mod.download_roads_311(str(tmp_path / "r.parquet"), limit=20)
+    assert calls == [(4, 0), (4, 4), (4, 8)]
+    assert len(load_parquet(tmp_path / "r.parquet")) == 9

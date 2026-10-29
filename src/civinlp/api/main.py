@@ -30,6 +30,7 @@ class BridgePredictionRequest(BaseModel):
     deck_rating: Optional[float] = None
     superstructure_rating: Optional[float] = None
     substructure_rating: Optional[float] = None
+    culvert_rating: Optional[float] = None
     traffic: Optional[float] = None
 
 class BridgePredictionResponse(BaseModel):

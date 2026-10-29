@@ -100,16 +100,28 @@ uvicorn civinlp.api.main:app --reload
 
 ## 📈 Performance & Results
 
-We evaluate our models using Macro-F1 for classification and Top-K Recall for ranking. 
+**Classification** is scored against rule-generated weak labels, so it only measures agreement with the rules:
 
-| Model | Task | Macro F1 | Status |
+| Model | Task | Macro F1 (vs. weak labels) |
+| :--- | :--- | :--- |
+| **Rule Baseline** | Defect | 1.00 (by construction) |
+| **TF-IDF + LR** | Defect | ~1.00 |
+| **TF-IDF + LR** | Severity | ~1.00 |
+| **Transformer** | Defect | *Pending* |
+
+Real accuracy needs hand labels: pass a CSV with `record_id`, `defect`, `severity` columns via `--gold`.
+
+**Ranking** is scored against an outcome the rules never see. Areas are ranked using complaints *before* a time cutoff, and graded by how many new road complaints each area received *after* it. Example run (20,000 road complaints, Sep–Oct 2026, 193 ZIP areas, cutoff at the time midpoint):
+
+| Ranking | NDCG@10 | Recall@20 | Spearman vs. future |
 | :--- | :--- | :--- | :--- |
-| **Rule Baseline** | Defect | ~1.00 | Baseline (keyword match) |
-| **TF-IDF + LR** | Defect | ~1.00 | Strong Baseline (trained on weak labels) |
-| **TF-IDF + LR** | Severity | ~1.00 | Severity classification |
-| **Transformer** | Defect | *Pending* | State-of-the-art (context-aware) |
+| Count only (H1) | 0.84 | 0.44 | 0.89 |
+| Recency (H2) | 0.63 | 0.28 | 0.53 |
+| Severity only (H3) | 0.06 | 0.10 | 0.18 |
+| **Priority score** | 0.84 | 0.44 | 0.89 |
+| Random | 0.35 | 0.18 | 0.13 |
 
-*Note: High F1 scores are expected when evaluating against weak labels (rule-generated ground truth). True performance requires human-annotated test data.*
+The priority score currently tracks complaint count almost exactly; the severity term adds little (see issue on score scaling).
 
 To reproduce these results, run the ablation suite:
 ```bash
@@ -122,7 +134,7 @@ python scripts/evaluate_all.py
 
 ### Obtaining Data
 - **NYC 311**: Automatically downloaded via the pipeline (`scripts/run_pipeline.py`). Source: [NYC Open Data](https://data.cityofnewyork.us/resource/erm2-nwe9).
-- **NBI Bridge Data**: Download manually from [FHWA](https://www.fhwa.dot.gov/bridge/nbi.cfm), then load with `python -m civinlp.data.download_nbi <path_to_csv>`.
+- **NBI Bridge Data**: Download manually from [FHWA](https://www.fhwa.dot.gov/bridge/nbi.cfm), then load and clean with `python -m civinlp.data.download_nbi <path_to_csv>` and `python -m civinlp.data.preprocess_bridges`. Rank bridges in the dashboard (Asset → Bridges).
 
 ### What is Stored
 - **Processed data**: Parquet files with PII-redacted text. No raw personal information is retained.
