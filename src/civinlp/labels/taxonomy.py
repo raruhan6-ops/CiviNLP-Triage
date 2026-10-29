@@ -3,6 +3,7 @@ from enum import StrEnum
 # StrEnum so str(RoadSeverity.HIGH) == "high" (a plain (str, Enum) gives
 # "RoadSeverity.HIGH", which silently broke string-based lookups downstream).
 
+
 class RoadDefectClass(StrEnum):
     POTHOLE = "pothole"
     CRACKING = "cracking"
@@ -10,6 +11,7 @@ class RoadDefectClass(StrEnum):
     OBSTRUCTION = "obstruction"
     SIGNAGE = "signage"
     OTHER = "other"
+
 
 class RoadSeverity(StrEnum):
     HIGH = "high"

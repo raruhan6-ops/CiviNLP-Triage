@@ -1,10 +1,16 @@
-import torch
-from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, Trainer, TrainingArguments
-from typing import List, Union, Optional, Dict, Any
-from pathlib import Path
-import numpy as np
 import json
 import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import numpy as np
+import torch
+from transformers import (
+    DistilBertForSequenceClassification,
+    DistilBertTokenizer,
+    Trainer,
+    TrainingArguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +21,16 @@ class TransformerClassifier:
 
     Persists label_map alongside model for consistent label decoding.
     """
-    def __init__(self, model_name: str = "distilbert-base-uncased", num_labels: int = 6):
+
+    def __init__(
+        self, model_name: str = "distilbert-base-uncased", num_labels: int = 6
+    ):
         self.model_name = model_name
         self.num_labels = num_labels
         self.tokenizer = DistilBertTokenizer.from_pretrained(model_name)
-        self.model = DistilBertForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
+        self.model = DistilBertForSequenceClassification.from_pretrained(
+            model_name, num_labels=num_labels
+        )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.label_map: Optional[Dict[str, int]] = None  # label_str -> index
@@ -56,15 +67,17 @@ class TransformerClassifier:
             epochs: Number of training epochs.
         """
         encodings = self.tokenizer(texts, truncation=True, padding=True, max_length=128)
-        
+
         class Dataset(torch.utils.data.Dataset):
             def __init__(self, encodings, labels):
                 self.encodings = encodings
                 self.labels = labels
 
             def __getitem__(self, idx):
-                item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-                item['labels'] = torch.tensor(self.labels[idx])
+                item = {
+                    key: torch.tensor(val[idx]) for key, val in self.encodings.items()
+                }
+                item["labels"] = torch.tensor(self.labels[idx])
                 return item
 
             def __len__(self):
@@ -76,15 +89,17 @@ class TransformerClassifier:
         eval_dataset = None
         eval_strategy = "no"
         if val_texts and val_labels:
-            val_encodings = self.tokenizer(val_texts, truncation=True, padding=True, max_length=128)
+            val_encodings = self.tokenizer(
+                val_texts, truncation=True, padding=True, max_length=128
+            )
             eval_dataset = Dataset(val_encodings, val_labels)
             eval_strategy = "epoch"
-        
+
         training_args = TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=epochs,
             per_device_train_batch_size=16,
-            logging_dir=f'{output_dir}/logs',
+            logging_dir=f"{output_dir}/logs",
             save_strategy="epoch",
             eval_strategy=eval_strategy,
             load_best_model_at_end=eval_dataset is not None,
@@ -100,20 +115,22 @@ class TransformerClassifier:
 
         trainer.train()
         logger.info("Transformer training complete.")
-    
+
     def predict(self, texts: List[str]) -> List[int]:
         """
         Predict class indices.
         """
         self.model.eval()
-        encodings = self.tokenizer(texts, truncation=True, padding=True, max_length=128, return_tensors="pt")
+        encodings = self.tokenizer(
+            texts, truncation=True, padding=True, max_length=128, return_tensors="pt"
+        )
         encodings = {k: v.to(self.device) for k, v in encodings.items()}
-        
+
         with torch.no_grad():
             outputs = self.model(**encodings)
             logits = outputs.logits
             preds = torch.argmax(logits, dim=-1)
-            
+
         return preds.cpu().numpy().tolist()
 
     def predict_labels(self, texts: List[str]) -> List[str]:
@@ -130,7 +147,9 @@ class TransformerClassifier:
             ValueError: If label_map has not been set.
         """
         if self.index_map is None:
-            raise ValueError("Label map not set. Call set_label_map() or load a model with saved label_map.")
+            raise ValueError(
+                "Label map not set. Call set_label_map() or load a model with saved label_map."
+            )
 
         indices = self.predict(texts)
         return [self.index_map.get(i, f"UNKNOWN_{i}") for i in indices]
@@ -140,13 +159,15 @@ class TransformerClassifier:
         Predict probabilities.
         """
         self.model.eval()
-        encodings = self.tokenizer(texts, truncation=True, padding=True, max_length=128, return_tensors="pt")
+        encodings = self.tokenizer(
+            texts, truncation=True, padding=True, max_length=128, return_tensors="pt"
+        )
         encodings = {k: v.to(self.device) for k, v in encodings.items()}
-        
+
         with torch.no_grad():
             outputs = self.model(**encodings)
             probs = torch.softmax(outputs.logits, dim=-1)
-            
+
         return probs.cpu().numpy()
 
     def predict_full(self, texts: List[str]) -> List[Dict[str, Any]]:
@@ -162,11 +183,17 @@ class TransformerClassifier:
 
         results = []
         for i, (pred_idx, conf) in enumerate(zip(predictions, confidences)):
-            label = self.index_map.get(int(pred_idx), f"UNKNOWN_{pred_idx}") if self.index_map else str(pred_idx)
-            results.append({
-                "defect_class": label,
-                "confidence": float(conf),
-            })
+            label = (
+                self.index_map.get(int(pred_idx), f"UNKNOWN_{pred_idx}")
+                if self.index_map
+                else str(pred_idx)
+            )
+            results.append(
+                {
+                    "defect_class": label,
+                    "confidence": float(conf),
+                }
+            )
         return results
 
     def save(self, path: Union[str, Path]):

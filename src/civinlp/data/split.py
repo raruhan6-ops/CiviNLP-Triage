@@ -5,9 +5,10 @@ Supports time-based and area-based splitting strategies for
 both road and bridge datasets. Ensures no data leakage between splits.
 """
 
-import pandas as pd
 import logging
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def area_based_split(
     if test_areas is None:
         # Randomly select areas until we hit ~test_frac of total rows
         import numpy as np
+
         rng = np.random.RandomState(seed)
         shuffled_areas = rng.permutation(all_areas)
 
@@ -151,6 +153,7 @@ def group_split(
         raise ValueError("test_frac + val_frac must be < 1.0")
 
     import numpy as np
+
     rng = np.random.RandomState(seed)
     groups = rng.permutation(sorted(df[group_column].astype(str).unique()))
     n_test = int(round(len(groups) * test_frac))
@@ -159,7 +162,7 @@ def group_split(
         raise ValueError(f"Too few groups ({len(groups)}) for the requested split")
 
     test_groups = set(groups[:n_test])
-    val_groups = set(groups[n_test:n_test + n_val])
+    val_groups = set(groups[n_test : n_test + n_val])
     keys = df[group_column].astype(str)
     test_df = df[keys.isin(test_groups)].copy()
     val_df = df[keys.isin(val_groups)].copy()
@@ -172,6 +175,10 @@ def group_split(
     return train_df, val_df, test_df
 
 
-def bridge_split(df: pd.DataFrame, test_frac: float = 0.2, val_frac: float = 0.1, seed: int = 42):
+def bridge_split(
+    df: pd.DataFrame, test_frac: float = 0.2, val_frac: float = 0.1, seed: int = 42
+):
     """Split bridge records by bridge_id (see configs/bridges.yaml)."""
-    return group_split(df, "bridge_id", test_frac=test_frac, val_frac=val_frac, seed=seed)
+    return group_split(
+        df, "bridge_id", test_frac=test_frac, val_frac=val_frac, seed=seed
+    )

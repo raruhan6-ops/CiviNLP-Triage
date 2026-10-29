@@ -1,13 +1,12 @@
 import re
 
 # Emails
-EMAIL_REGEX = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
+EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
 # US phone numbers. A separator, parentheses or a +1 prefix is required, so bare
 # 10-digit IDs (e.g. NYC BBL tax-lot numbers) are left alone.
 PHONE_REGEX = re.compile(
-    r'(?:\+1[-.\s]?)?(?:\(\d{3}\)\s?|\b\d{3}[-.\s])\d{3}[-.\s]\d{4}\b'
-    r'|\+1\d{10}\b'
+    r"(?:\+1[-.\s]?)?(?:\(\d{3}\)\s?|\b\d{3}[-.\s])\d{3}[-.\s]\d{4}\b" r"|\+1\d{10}\b"
 )
 
 # Street addresses: house number + 1-4 words + a street suffix ("123 W 45th St")
@@ -38,7 +37,7 @@ def redact_pii(text: str) -> str:
     if not isinstance(text, str):
         return ""
 
-    text = EMAIL_REGEX.sub('[EMAIL_REDACTED]', text)
-    text = PHONE_REGEX.sub('[PHONE_REDACTED]', text)
-    text = ADDRESS_REGEX.sub('[ADDRESS_REDACTED]', text)
+    text = EMAIL_REGEX.sub("[EMAIL_REDACTED]", text)
+    text = PHONE_REGEX.sub("[PHONE_REDACTED]", text)
+    text = ADDRESS_REGEX.sub("[ADDRESS_REDACTED]", text)
     return text

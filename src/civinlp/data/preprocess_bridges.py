@@ -33,7 +33,12 @@ NBI_COLUMN_MAPPING = {
     "LONG_017": "longitude",
 }
 
-RATING_COLUMNS = ["deck_rating", "superstructure_rating", "substructure_rating", "culvert_rating"]
+RATING_COLUMNS = [
+    "deck_rating",
+    "superstructure_rating",
+    "substructure_rating",
+    "culvert_rating",
+]
 MISSING_RATING_FILL = 9
 
 
@@ -54,8 +59,8 @@ def nbi_coord_to_decimal(series: pd.Series, degree_digits: int) -> pd.Series:
     width = degree_digits + 6
     s = s.where(s.str.fullmatch(r"\d+"), None).str.zfill(width)
     deg = pd.to_numeric(s.str[:degree_digits], errors="coerce")
-    minutes = pd.to_numeric(s.str[degree_digits:degree_digits + 2], errors="coerce")
-    seconds = pd.to_numeric(s.str[degree_digits + 2:], errors="coerce") / 100
+    minutes = pd.to_numeric(s.str[degree_digits : degree_digits + 2], errors="coerce")
+    seconds = pd.to_numeric(s.str[degree_digits + 2 :], errors="coerce") / 100
     decimal = deg + minutes / 60 + seconds / 3600
     valid = (minutes < 60) & (seconds < 60) & (deg > 0)
     return decimal.where(valid)
@@ -73,7 +78,9 @@ def preprocess_bridges(input_path: str, output_path: str) -> pd.DataFrame:
 
 def clean_bridges(df: pd.DataFrame) -> pd.DataFrame:
     """In-memory version of preprocess_bridges (used by tests and the UI)."""
-    df = df.rename(columns={k: v for k, v in NBI_COLUMN_MAPPING.items() if k in df.columns})
+    df = df.rename(
+        columns={k: v for k, v in NBI_COLUMN_MAPPING.items() if k in df.columns}
+    )
 
     if "bridge_id" not in df.columns:
         raise ValueError("NBI data needs STRUCTURE_NUMBER_008 (or bridge_id)")
@@ -118,6 +125,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Preprocess NBI Bridge Data")
     parser.add_argument("--input", type=str, default="data_raw/bridges_nbi.parquet")
-    parser.add_argument("--output", type=str, default="data_processed/bridges_processed.parquet")
+    parser.add_argument(
+        "--output", type=str, default="data_processed/bridges_processed.parquet"
+    )
     args = parser.parse_args()
     preprocess_bridges(args.input, args.output)

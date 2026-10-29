@@ -1,21 +1,29 @@
 import argparse
-import pandas as pd
-from pathlib import Path
-from typing import Optional
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import logging
 import time
+from typing import Optional
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-from civinlp.utils.io import save_parquet, load_csv
-from civinlp.data.schema import RawRoadSchema, ROAD_COMPLAINT_TYPES
+import pandas as pd
+
+from civinlp.data.schema import ROAD_COMPLAINT_TYPES, RawRoadSchema
+from civinlp.utils.io import save_parquet
 
 logger = logging.getLogger(__name__)
 
 NYC_311_RESOURCE = "https://data.cityofnewyork.us/resource/erm2-nwe9.csv"
 DEFAULT_LIMIT = 2000
 SELECT_COLUMNS = [
-    "unique_key", "created_date", "closed_date", "status", "complaint_type",
-    "descriptor", "incident_zip", "borough", "latitude", "longitude",
+    "unique_key",
+    "created_date",
+    "closed_date",
+    "status",
+    "complaint_type",
+    "descriptor",
+    "incident_zip",
+    "borough",
+    "latitude",
+    "longitude",
 ]
 
 
@@ -53,7 +61,11 @@ PAGE_SIZE = 5000
 
 
 def read_socrata_paged(
-    base_url: str, limit: int, page_size: Optional[int] = None, retries: int = 3, **read_kwargs
+    base_url: str,
+    limit: int,
+    page_size: Optional[int] = None,
+    retries: int = 3,
+    **read_kwargs,
 ) -> pd.DataFrame:
     """Fetch up to `limit` rows in pages; large single responses tend to get cut off."""
     page_size = page_size or PAGE_SIZE
@@ -68,7 +80,9 @@ def read_socrata_paged(
             except Exception as e:
                 if attempt == retries:
                     raise
-                logger.warning(f"Page at offset {offset} failed ({e}); retry {attempt}/{retries - 1}")
+                logger.warning(
+                    f"Page at offset {offset} failed ({e}); retry {attempt}/{retries - 1}"
+                )
                 time.sleep(2 * attempt)
         pages.append(page)
         logger.info(f"Fetched {offset + len(page)} rows")
@@ -78,7 +92,11 @@ def read_socrata_paged(
     return pd.concat(pages, ignore_index=True) if pages else pd.DataFrame()
 
 
-def download_roads_311(output_path: str, source_url_or_path: Optional[str] = None, limit: Optional[int] = None):
+def download_roads_311(
+    output_path: str,
+    source_url_or_path: Optional[str] = None,
+    limit: Optional[int] = None,
+):
     """
     Download or load NYC 311 data, simple validation, and save to Parquet.
 
@@ -113,7 +131,9 @@ def download_roads_311(output_path: str, source_url_or_path: Optional[str] = Non
     # Basic Validation
     missing_cols = RawRoadSchema.validate_columns(df)
     if missing_cols:
-        logger.warning(f"Missing expected columns: {missing_cols}. Proceeding, but downstream steps may fail.")
+        logger.warning(
+            f"Missing expected columns: {missing_cols}. Proceeding, but downstream steps may fail."
+        )
     else:
         logger.info("Schema validation passed.")
 
@@ -121,12 +141,15 @@ def download_roads_311(output_path: str, source_url_or_path: Optional[str] = Non
     save_parquet(df, output_path)
     logger.info(f"Saved raw data to {output_path}")
 
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Download NYC 311 Road Data")
-    parser.add_argument("--output", type=str, default="data_raw/roads_311.parquet", help="Output path")
+    parser.add_argument(
+        "--output", type=str, default="data_raw/roads_311.parquet", help="Output path"
+    )
     parser.add_argument("--source", type=str, help="Local CSV path or URL")
     parser.add_argument("--limit", type=int, help="Limit number of rows")
-    
+
     args = parser.parse_args()
     download_roads_311(args.output, args.source, args.limit)

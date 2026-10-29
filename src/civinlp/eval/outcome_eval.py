@@ -52,7 +52,9 @@ def temporal_outcome_split(
 
     history = df[valid & (times < cutoff)].copy()
     future = df[valid & (times >= cutoff)].copy()
-    logger.info(f"Outcome split at {cutoff}: history={len(history)}, future={len(future)}")
+    logger.info(
+        f"Outcome split at {cutoff}: history={len(history)}, future={len(future)}"
+    )
     return history, future, cutoff
 
 
@@ -71,10 +73,11 @@ def future_outcomes(
                  2^rel - 1 gain overflows on raw counts).
         critical: areas in the top `critical_frac` by future count.
     """
-    areas = [a for a in history[area_column].astype(str).unique() if a not in EXCLUDED_AREAS]
+    areas = [
+        a for a in history[area_column].astype(str).unique() if a not in EXCLUDED_AREAS
+    ]
     future_counts = future[area_column].astype(str).value_counts()
     counts = {a: float(future_counts.get(a, 0)) for a in areas}
-
 
     n_critical = max(1, int(round(len(areas) * critical_frac))) if areas else 0
     ordered = sorted(counts, key=lambda a: (-counts[a], a))
@@ -201,7 +204,11 @@ def weight_sensitivity(
 
     rows = []
     for weights in grid:
-        ranked = baseline_rankings(history, area_column, time_column, RoadPriorityScorer(**weights))
-        result = evaluate_rankings({"priority": ranked["priority"]}, counts, critical, k_values)
+        ranked = baseline_rankings(
+            history, area_column, time_column, RoadPriorityScorer(**weights)
+        )
+        result = evaluate_rankings(
+            {"priority": ranked["priority"]}, counts, critical, k_values
+        )
         rows.append({**weights, **result.drop(columns=["ranking"]).iloc[0].to_dict()})
     return pd.DataFrame(rows)

@@ -1,10 +1,11 @@
-from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from pathlib import Path
 import hmac
 import logging
 import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from fastapi import Depends, FastAPI, Header, HTTPException
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +39,19 @@ app = FastAPI(
 
 # ─── Request / Response Schemas ───────────────────────────────────────────────
 
+
 class RoadPredictionRequest(BaseModel):
     record_id: Optional[str] = None
     text: str
     metadata: Optional[dict] = None
+
 
 class RoadPredictionResponse(BaseModel):
     record_id: Optional[str] = None
     defect_class: str
     severity: str
     confidence: float
+
 
 class BridgePredictionRequest(BaseModel):
     bridge_id: str
@@ -57,15 +61,18 @@ class BridgePredictionRequest(BaseModel):
     culvert_rating: Optional[float] = None
     traffic: Optional[float] = None
 
+
 class BridgePredictionResponse(BaseModel):
     bridge_id: str
     severity_score: float
     priority_score: float
 
+
 class RankingRequest(BaseModel):
     road_predictions: Optional[List[dict]] = None
     bridge_predictions: Optional[List[dict]] = None
     k: int = 10
+
 
 class RankingResponse(BaseModel):
     road_rankings: Optional[List[dict]] = None
@@ -76,6 +83,7 @@ class RankingResponse(BaseModel):
 
 _models: Dict[str, Any] = {}
 
+
 def _load_models():
     """Load models at startup (lazy, once)."""
     if _models:
@@ -85,16 +93,19 @@ def _load_models():
     tfidf_path = Path("models/tfidf_baseline.joblib")
     if tfidf_path.exists():
         from civinlp.models.tfidf_lr import TfidfBaseline
+
         _models["tfidf"] = TfidfBaseline.load(tfidf_path)
         logger.info(f"Loaded TF-IDF model from {tfidf_path}")
 
     # Always have rule baseline available
     from civinlp.models.baseline_rules import RuleBaseline
+
     _models["rules"] = RuleBaseline()
     logger.info("Rule baseline loaded")
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @app.get("/")
 def read_root():
@@ -140,12 +151,14 @@ def predict_roads(requests: List[RoadPredictionRequest]):
 
     responses = []
     for i, req in enumerate(requests):
-        responses.append(RoadPredictionResponse(
-            record_id=req.record_id,
-            defect_class=str(defect_preds[i]),
-            severity=str(severity_preds[i]),
-            confidence=confidences[i],
-        ))
+        responses.append(
+            RoadPredictionResponse(
+                record_id=req.record_id,
+                defect_class=str(defect_preds[i]),
+                severity=str(severity_preds[i]),
+                confidence=confidences[i],
+            )
+        )
     return responses
 
 
@@ -156,17 +169,20 @@ def predict_bridges(requests: List[BridgePredictionRequest]):
     """
     check_batch(requests)
     from civinlp.ranking.bridge_priority import BridgePriorityScorer
+
     scorer = BridgePriorityScorer()
 
     responses = []
     for req in requests:
         record = req.model_dump()
         result = scorer.score_bridge(record)
-        responses.append(BridgePredictionResponse(
-            bridge_id=req.bridge_id,
-            severity_score=result["severity"],
-            priority_score=result["priority_score"],
-        ))
+        responses.append(
+            BridgePredictionResponse(
+                bridge_id=req.bridge_id,
+                severity_score=result["severity"],
+                priority_score=result["priority_score"],
+            )
+        )
     return responses
 
 
@@ -184,6 +200,7 @@ def rank_assets(request: RankingRequest):
 
     if request.road_predictions:
         from civinlp.ranking.road_priority import RoadPriorityScorer
+
         scorer = RoadPriorityScorer()
         df = pd.DataFrame(request.road_predictions)
         if "area_id" in df.columns:
@@ -192,6 +209,7 @@ def rank_assets(request: RankingRequest):
 
     if request.bridge_predictions:
         from civinlp.ranking.bridge_priority import BridgePriorityScorer
+
         scorer = BridgePriorityScorer()
         df = pd.DataFrame(request.bridge_predictions)
         ranked = scorer.rank_bridges(df)

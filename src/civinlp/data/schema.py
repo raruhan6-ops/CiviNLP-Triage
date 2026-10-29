@@ -1,9 +1,12 @@
-from typing import List, Dict, Optional
+from typing import List, Optional
+
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
+
 
 class RoadRecord(BaseModel):
     """Internal schema for a road defect record."""
+
     record_id: str
     created_at: pd.Timestamp
     text: str
@@ -17,6 +20,7 @@ class RoadRecord(BaseModel):
 
 class BridgeRecord(BaseModel):
     """Internal schema for a bridge inspection record."""
+
     bridge_id: str
     inspection_year: Optional[int] = None
     deck_rating: Optional[float] = None
@@ -31,6 +35,7 @@ class BridgeRecord(BaseModel):
 
 class PredictionOutput(BaseModel):
     """Schema for prediction outputs (roads and bridges)."""
+
     record_id: str
     asset_type: str  # "road" or "bridge"
     predicted_defect: Optional[str] = None
@@ -62,12 +67,9 @@ def is_road_complaint(complaint_type) -> bool:
 
 class RawRoadSchema:
     """Expected columns in the raw NYC 311 dataset."""
-    REQUIRED_COLUMNS = [
-        "unique_key",
-        "created_date",
-        "complaint_type"
-    ]
-    
+
+    REQUIRED_COLUMNS = ["unique_key", "created_date", "complaint_type"]
+
     # Common mappings from NYC 311 to internal schema
     COLUMN_MAPPING = {
         "unique_key": "record_id",
@@ -84,22 +86,24 @@ class RawRoadSchema:
         """Returns a list of missing required columns."""
         return [c for c in cls.REQUIRED_COLUMNS if c not in df.columns]
 
+
 class BridgeSchema:
     """Expected columns in NBI data."""
+
     REQUIRED_COLUMNS = [
         "STRUCTURE_NUMBER_008",  # bridge_id
     ]
 
     OPTIONAL_COLUMNS = [
-        "DECK_COND_058",            # deck condition rating
+        "DECK_COND_058",  # deck condition rating
         "SUPERSTRUCTURE_COND_059",  # superstructure condition
-        "SUBSTRUCTURE_COND_060",    # substructure condition
-        "ADT_029",                  # average daily traffic
-        "YEAR_BUILT_027",           # year built
-        "STATE_CODE_001",           # state
-        "COUNTY_CODE_003",          # county
-        "LAT_016",                  # latitude
-        "LONG_017",                 # longitude
+        "SUBSTRUCTURE_COND_060",  # substructure condition
+        "ADT_029",  # average daily traffic
+        "YEAR_BUILT_027",  # year built
+        "STATE_CODE_001",  # state
+        "COUNTY_CODE_003",  # county
+        "LAT_016",  # latitude
+        "LONG_017",  # longitude
     ]
 
     @classmethod

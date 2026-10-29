@@ -1,10 +1,12 @@
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+
+import joblib
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
-import joblib
-from pathlib import Path
-from typing import List, Union, Dict, Any, Optional
-import numpy as np
+
 
 class TfidfBaseline:
     """
@@ -12,6 +14,7 @@ class TfidfBaseline:
 
     Supports separate tasks for defect classification and severity prediction.
     """
+
     def __init__(self, max_features: int = 5000, task: str = "defect"):
         """
         Args:
@@ -19,10 +22,15 @@ class TfidfBaseline:
             task: Either "defect" or "severity" to indicate the classification target.
         """
         self.task = task
-        self.pipeline = Pipeline([
-            ('tfidf', TfidfVectorizer(max_features=max_features, stop_words='english')),
-            ('clf', LogisticRegression(class_weight='balanced', max_iter=1000))
-        ])
+        self.pipeline = Pipeline(
+            [
+                (
+                    "tfidf",
+                    TfidfVectorizer(max_features=max_features, stop_words="english"),
+                ),
+                ("clf", LogisticRegression(class_weight="balanced", max_iter=1000)),
+            ]
+        )
         self.classes_: Optional[List[str]] = None
 
     def train(self, texts: List[str], labels: List[str]):
@@ -33,7 +41,7 @@ class TfidfBaseline:
     def predict(self, texts: List[str]) -> List[str]:
         """Predict labels for texts."""
         return self.pipeline.predict(texts).tolist()
-    
+
     def predict_proba(self, texts: List[str]) -> np.ndarray:
         """Predict probabilities."""
         return self.pipeline.predict_proba(texts)
@@ -47,10 +55,7 @@ class TfidfBaseline:
         """
         probs = self.predict_proba(texts)
         classes = self.pipeline.classes_
-        return [
-            {cls: float(prob) for cls, prob in zip(classes, row)}
-            for row in probs
-        ]
+        return [{cls: float(prob) for cls, prob in zip(classes, row)} for row in probs]
 
     def get_top_features(self, n: int = 10) -> Dict[str, List[str]]:
         """
@@ -59,8 +64,8 @@ class TfidfBaseline:
         Returns:
             Dict mapping class_label -> list of top feature names.
         """
-        tfidf = self.pipeline.named_steps['tfidf']
-        clf = self.pipeline.named_steps['clf']
+        tfidf = self.pipeline.named_steps["tfidf"]
+        clf = self.pipeline.named_steps["clf"]
         feature_names = tfidf.get_feature_names_out()
 
         top_features = {}
@@ -76,7 +81,7 @@ class TfidfBaseline:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump({"pipeline": self.pipeline, "task": self.task}, path)
-        
+
     @classmethod
     def load(cls, path: Union[str, Path]):
         """Load model from disk."""

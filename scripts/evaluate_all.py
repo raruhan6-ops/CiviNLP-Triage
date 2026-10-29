@@ -1,19 +1,20 @@
 import argparse
-import pandas as pd
 import json
-import os
 import logging
+import os
 from pathlib import Path
 
+import pandas as pd
+
 from civinlp.eval.ablation import AblationRunner
-from civinlp.eval.error_analysis import get_top_errors, generate_error_report
 from civinlp.eval.classification_metrics import compute_classification_report
+from civinlp.eval.error_analysis import generate_error_report, get_top_errors
 from civinlp.eval.outcome_eval import run_outcome_evaluation, weight_sensitivity
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.calibrate import calibration_report
 from civinlp.models.tfidf_lr import TfidfBaseline
-from civinlp.utils.seed import set_global_seed
 from civinlp.utils.logging_config import setup_logging
+from civinlp.utils.seed import set_global_seed
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,34 @@ def evaluate_against_gold(runner, tfidf, gold_path):
     rows = []
     if "defect" in merged.columns:
         y_true = merged["defect"].astype(str).str.lower().tolist()
-        for name, preds in [("RuleBaseline", [p.value for p in rules.predict(texts)]),
-                            ("TF-IDF (defect)", tfidf.predict(texts))]:
-            rep = compute_classification_report(y_true, [str(p) for p in preds], critical_class=None)
-            rows.append({"Task": "defect", "Model": name, "n": len(y_true), "MacroF1": rep["macro_f1"]})
+        for name, preds in [
+            ("RuleBaseline", [p.value for p in rules.predict(texts)]),
+            ("TF-IDF (defect)", tfidf.predict(texts)),
+        ]:
+            rep = compute_classification_report(
+                y_true, [str(p) for p in preds], critical_class=None
+            )
+            rows.append(
+                {
+                    "Task": "defect",
+                    "Model": name,
+                    "n": len(y_true),
+                    "MacroF1": rep["macro_f1"],
+                }
+            )
     if "severity" in merged.columns:
         y_true = merged["severity"].astype(str).str.lower().tolist()
         preds = [s.value for s in rules.predict_severity(texts)]
         rep = compute_classification_report(y_true, preds, critical_class="high")
-        rows.append({"Task": "severity", "Model": "RuleBaseline", "n": len(y_true),
-                     "MacroF1": rep["macro_f1"], "CriticalRecall": rep["critical_recall"]})
+        rows.append(
+            {
+                "Task": "severity",
+                "Model": "RuleBaseline",
+                "n": len(y_true),
+                "MacroF1": rep["macro_f1"],
+                "CriticalRecall": rep["critical_recall"],
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -62,10 +81,17 @@ def main():
     parser.add_argument("--output_dir", default="results/")
     parser.add_argument("--transformer_path", default="models/distilbert_finetuned")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--gold", default=None,
-                        help="Optional hand-labelled CSV (record_id, defect, severity)")
-    parser.add_argument("--history_frac", type=float, default=0.5,
-                        help="Fraction of the time range used as ranking history")
+    parser.add_argument(
+        "--gold",
+        default=None,
+        help="Optional hand-labelled CSV (record_id, defect, severity)",
+    )
+    parser.add_argument(
+        "--history_frac",
+        type=float,
+        default=0.5,
+        help="Fraction of the time range used as ranking history",
+    )
     args = parser.parse_args()
 
     set_global_seed(args.seed)
@@ -79,7 +105,9 @@ def main():
     runner = AblationRunner(args.data)
 
     # Run all models (including transformer if available)
-    transformer_path = args.transformer_path if Path(args.transformer_path).exists() else None
+    transformer_path = (
+        args.transformer_path if Path(args.transformer_path).exists() else None
+    )
     results = runner.run_all(transformer_path=transformer_path)
     print("\nAblation Results:")
     print(results.to_string(index=False))
@@ -89,13 +117,13 @@ def main():
     # 2. Error Analysis (Real Predictions)
     # ============================================================
     print("\n=== Generating Error Analysis ===")
-    test_texts = runner.test_df['text'].fillna("").astype(str).tolist()
-    test_labels = [str(l) for l in runner.test_df['label'].tolist()]
+    test_texts = runner.test_df["text"].fillna("").astype(str).tolist()
+    test_labels = [str(lab) for lab in runner.test_df["label"].tolist()]
 
     # Use TF-IDF for error analysis (most interesting errors)
     tfidf = TfidfBaseline(task="defect")
-    train_texts = runner.train_df['text'].fillna("").astype(str).tolist()
-    train_labels = [str(l) for l in runner.train_df['label'].tolist()]
+    train_texts = runner.train_df["text"].fillna("").astype(str).tolist()
+    train_labels = [str(lab) for lab in runner.train_df["label"].tolist()]
     tfidf.train(train_texts, train_labels)
 
     y_pred_tfidf = tfidf.predict(test_texts)
@@ -105,14 +133,18 @@ def main():
     errors = get_top_errors(test_texts, test_labels, y_pred_tfidf, confidences, k=20)
     print(f"Found {len(errors)} errors in top-20:")
     if len(errors) > 0:
-        print(errors[['text', 'y_true', 'y_pred', 'confidence']].head().to_string(index=False))
+        print(
+            errors[["text", "y_true", "y_pred", "confidence"]]
+            .head()
+            .to_string(index=False)
+        )
     generate_error_report(errors, os.path.join(args.output_dir, "error_analysis.csv"))
 
     # Calibration: temperature fitted on validation, ECE on test (vs weak labels)
     print("\n=== Calibration (TF-IDF defect) ===")
     calibration = calibration_report(
-        tfidf.predict_proba(runner.val_df['text'].fillna("").astype(str).tolist()),
-        [str(l) for l in runner.val_df['label'].tolist()],
+        tfidf.predict_proba(runner.val_df["text"].fillna("").astype(str).tolist()),
+        [str(lab) for lab in runner.val_df["label"].tolist()],
         proba,
         test_labels,
         tfidf.classes_,
@@ -128,7 +160,9 @@ def main():
         gold_results = evaluate_against_gold(runner, tfidf, args.gold)
         if gold_results is not None:
             print(gold_results.to_string(index=False))
-            gold_results.to_csv(os.path.join(args.output_dir, "gold_results.csv"), index=False)
+            gold_results.to_csv(
+                os.path.join(args.output_dir, "gold_results.csv"), index=False
+            )
 
     # ============================================================
     # 4. Ranking Evaluation (future outcomes, not rule labels)
@@ -136,28 +170,35 @@ def main():
     print("\n=== Running Outcome-based Ranking Evaluation ===")
     df = runner.df.copy()
     rule_model = RuleBaseline()
-    df['predicted_severity'] = [
-        str(s.value) for s in rule_model.predict_severity(df['text'].fillna("").astype(str).tolist())
+    df["predicted_severity"] = [
+        str(s.value)
+        for s in rule_model.predict_severity(df["text"].fillna("").astype(str).tolist())
     ]
 
     ranking_results, ranking_info = None, {}
-    if 'area_id' in df.columns and 'created_at' in df.columns:
+    if "area_id" in df.columns and "created_at" in df.columns:
         try:
             ranking_results, ranking_info = run_outcome_evaluation(
                 df, history_frac=args.history_frac, seed=args.seed
             )
             print(f"Ground truth: {ranking_info['relevance']}")
-            print(f"Cutoff {ranking_info['cutoff']}, {ranking_info['rankable_areas']} rankable areas, "
-                  f"{ranking_info['critical_areas']} critical")
+            print(
+                f"Cutoff {ranking_info['cutoff']}, {ranking_info['rankable_areas']} rankable areas, "
+                f"{ranking_info['critical_areas']} critical"
+            )
             print(ranking_results.to_string(index=False))
-            ranking_results.to_csv(os.path.join(args.output_dir, "ranking_results.csv"), index=False)
+            ranking_results.to_csv(
+                os.path.join(args.output_dir, "ranking_results.csv"), index=False
+            )
 
             # Severity weight trade-off (alpha fixed at 1). Report it; don't tune
             # beta to this metric, which rewards volume by construction.
             sensitivity = weight_sensitivity(df, history_frac=args.history_frac)
             print("\nPriority-score sensitivity to weights:")
             print(sensitivity.round(3).to_string(index=False))
-            sensitivity.to_csv(os.path.join(args.output_dir, "ranking_sensitivity.csv"), index=False)
+            sensitivity.to_csv(
+                os.path.join(args.output_dir, "ranking_sensitivity.csv"), index=False
+            )
         except ValueError as e:
             print(f"Skipping ranking evaluation: {e}")
     else:
@@ -175,10 +216,16 @@ def main():
         # Measured against rule-generated weak labels: shows agreement with the
         # rules, not real-world accuracy. See gold_results for that.
         "weak_label_agreement": results.to_dict(orient="records"),
-        "gold_results": gold_results.to_dict(orient="records") if gold_results is not None else None,
+        "gold_results": (
+            gold_results.to_dict(orient="records") if gold_results is not None else None
+        ),
         "ranking_outcome_eval": {
             **ranking_info,
-            "results": ranking_results.to_dict(orient="records") if ranking_results is not None else [],
+            "results": (
+                ranking_results.to_dict(orient="records")
+                if ranking_results is not None
+                else []
+            ),
         },
         "calibration_tfidf_defect": calibration,
         "error_count": len(errors),

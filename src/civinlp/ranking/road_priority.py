@@ -1,8 +1,10 @@
-from typing import List, Dict, Any, Optional
-import pandas as pd
-import numpy as np
-from civinlp.labels.taxonomy import RoadSeverity
 import logging
+from typing import Any, Dict, Optional
+
+import numpy as np
+import pandas as pd
+
+from civinlp.labels.taxonomy import RoadSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +22,10 @@ class RoadPriorityScorer:
     Without this, the raw count dominated (50 minor complaints beat 5 severe
     ones whatever beta was).
     """
+
     def __init__(self, alpha=1.0, beta=1.0, gamma=0.5, delta=0.5):
         self.alpha = alpha  # weight for count
-        self.beta = beta    # weight for severity
+        self.beta = beta  # weight for severity
         self.gamma = gamma  # weight for repeat rate
         self.delta = delta  # weight for uncertainty penalty
 
@@ -40,7 +43,9 @@ class RoadPriorityScorer:
         }
         return severity_map.get(severity, 1)
 
-    def score_area(self, area_df: pd.DataFrame, max_count: Optional[int] = None) -> Dict[str, Any]:
+    def score_area(
+        self, area_df: pd.DataFrame, max_count: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Score an area based on a DataFrame of complaints in that area.
 
@@ -58,16 +63,22 @@ class RoadPriorityScorer:
         count = len(area_df)
 
         # Average severity
-        if 'predicted_severity' in area_df.columns:
-            avg_severity = area_df['predicted_severity'].map(self._severity_to_numeric).mean()
+        if "predicted_severity" in area_df.columns:
+            avg_severity = (
+                area_df["predicted_severity"].map(self._severity_to_numeric).mean()
+            )
         else:
             avg_severity = 1.0
 
         # Repeat rate: fraction of complaints from same area within 7 days of another
         repeat_rate = 0.0
-        if 'created_at' in area_df.columns and len(area_df) > 1:
+        if "created_at" in area_df.columns and len(area_df) > 1:
             try:
-                dates = pd.to_datetime(area_df['created_at'], errors='coerce').dropna().sort_values()
+                dates = (
+                    pd.to_datetime(area_df["created_at"], errors="coerce")
+                    .dropna()
+                    .sort_values()
+                )
                 if len(dates) > 1:
                     diffs = dates.diff().dt.total_seconds() / 86400  # days
                     repeat_count = (diffs <= 7).sum()
@@ -76,8 +87,8 @@ class RoadPriorityScorer:
                 repeat_rate = 0.0
 
         # Uncertainty penalty
-        if 'confidence' in area_df.columns:
-            avg_conf = area_df['confidence'].mean()
+        if "confidence" in area_df.columns:
+            avg_conf = area_df["confidence"].mean()
             uncertainty_penalty = 1.0 - avg_conf
         else:
             uncertainty_penalty = 0.0
@@ -129,17 +140,19 @@ class RoadPriorityScorer:
         Returns:
             DataFrame sorted by priority_score descending.
         """
-        if 'area_id' not in df.columns:
+        if "area_id" not in df.columns:
             raise ValueError("Dataframe must have 'area_id'")
 
         # Optional time window grouping
-        group_cols = ['area_id']
-        if time_window and 'created_at' in df.columns:
+        group_cols = ["area_id"]
+        if time_window and "created_at" in df.columns:
             try:
                 df = df.copy()
-                df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
-                df['time_window'] = df['created_at'].dt.to_period(time_window).astype(str)
-                group_cols.append('time_window')
+                df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+                df["time_window"] = (
+                    df["created_at"].dt.to_period(time_window).astype(str)
+                )
+                group_cols.append("time_window")
             except Exception as e:
                 logger.warning(f"Time window grouping failed: {e}")
 
@@ -156,5 +169,5 @@ class RoadPriorityScorer:
 
         results = pd.DataFrame(scores).sort_values("priority_score", ascending=False)
         results = results.reset_index(drop=True)
-        results['priority_rank'] = range(1, len(results) + 1)
+        results["priority_rank"] = range(1, len(results) + 1)
         return results

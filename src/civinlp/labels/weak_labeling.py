@@ -6,12 +6,31 @@ from civinlp.labels.taxonomy import RoadDefectClass, RoadSeverity
 # Plain words match as whole words with common inflections (crack -> cracks, cracked);
 # a trailing "*" marks a stem that matches any word starting with it (danger* -> dangerous).
 HIGH_SEVERITY_KEYWORDS = [
-    "collapse", "sinkhole", "cave", "hazard*", "danger*", "emergency",
-    "flood", "major", "severe", "urgent", "impassable", "accident",
+    "collapse",
+    "sinkhole",
+    "cave",
+    "hazard*",
+    "danger*",
+    "emergency",
+    "flood",
+    "major",
+    "severe",
+    "urgent",
+    "impassable",
+    "accident",
 ]
 MEDIUM_SEVERITY_KEYWORDS = [
-    "crack", "rough", "damage", "broken", "large", "deep", "multiple",
-    "deteriorat*", "erosion", "uneven", "bump",
+    "crack",
+    "rough",
+    "damage",
+    "broken",
+    "large",
+    "deep",
+    "multiple",
+    "deteriorat*",
+    "erosion",
+    "uneven",
+    "bump",
 ]
 
 

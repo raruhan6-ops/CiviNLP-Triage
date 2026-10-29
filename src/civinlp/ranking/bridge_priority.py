@@ -1,14 +1,21 @@
-from typing import Dict, Any, List, Optional
-import pandas as pd
-import numpy as np
 import logging
+from typing import Any, Dict, Optional
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 # Condition rating fields: internal names (see preprocess_bridges) and raw NBI items
 RATING_KEYS = {
-    "deck_rating", "superstructure_rating", "substructure_rating", "culvert_rating",
-    "DECK_COND_058", "SUPERSTRUCTURE_COND_059", "SUBSTRUCTURE_COND_060", "CULVERT_COND_062",
+    "deck_rating",
+    "superstructure_rating",
+    "substructure_rating",
+    "culvert_rating",
+    "DECK_COND_058",
+    "SUPERSTRUCTURE_COND_059",
+    "SUBSTRUCTURE_COND_060",
+    "CULVERT_COND_062",
 }
 
 
@@ -29,6 +36,7 @@ class BridgePriorityScorer:
 
     Supports both single-bridge scoring and batch ranking across a DataFrame.
     """
+
     def __init__(self, severity_weight: float = 1.0, traffic_weight: float = 0.5):
         self.severity_weight = severity_weight
         self.traffic_weight = traffic_weight
@@ -50,8 +58,14 @@ class BridgePriorityScorer:
             return max(0.0, 9.0 - rating)
 
         # Multiple element conditions (e.g., deck, superstructure, substructure)
-        rating_keys = [k for k in element_states if "rating" in k.lower() or "cond" in k.lower()]
-        ratings = [r for r in (_to_rating(element_states[k]) for k in rating_keys) if r is not None]
+        rating_keys = [
+            k for k in element_states if "rating" in k.lower() or "cond" in k.lower()
+        ]
+        ratings = [
+            r
+            for r in (_to_rating(element_states[k]) for k in rating_keys)
+            if r is not None
+        ]
         if ratings:
             # Use worst (minimum) rating for severity
             return max(0.0, 9.0 - min(ratings))
@@ -75,13 +89,16 @@ class BridgePriorityScorer:
         else:
             # Fallback to individual rating columns (internal or raw NBI names)
             rating_cols = {
-                k: v for k, v in bridge_record.items()
+                k: v
+                for k, v in bridge_record.items()
                 if k in RATING_KEYS and _to_rating(v) is not None
             }
             severity = self.calculate_severity(rating_cols) if rating_cols else 0.0
 
         # Traffic/importance factor
-        traffic = bridge_record.get("traffic", bridge_record.get("adt", bridge_record.get("ADT_029", 0)))
+        traffic = bridge_record.get(
+            "traffic", bridge_record.get("adt", bridge_record.get("ADT_029", 0))
+        )
         try:
             traffic_factor = float(np.log1p(max(0.0, float(traffic))))
         except (ValueError, TypeError):
@@ -130,19 +147,26 @@ class BridgePriorityScorer:
             logger.warning("No rating columns found; all severities are 0")
             severity = pd.Series(0.0, index=df.index)
 
-        traffic_col = next((c for c in ["traffic", "adt", "ADT_029"] if c in df.columns), None)
+        traffic_col = next(
+            (c for c in ["traffic", "adt", "ADT_029"] if c in df.columns), None
+        )
         if traffic_col:
             traffic = pd.to_numeric(df[traffic_col], errors="coerce").clip(lower=0)
             traffic_factor = np.log1p(traffic).fillna(0.0)
         else:
             traffic_factor = pd.Series(0.0, index=df.index)
 
-        results = pd.DataFrame({
-            "bridge_id": df[id_col].values,
-            "priority_score": (self.severity_weight * severity + self.traffic_weight * traffic_factor).values,
-            "severity": severity.values,
-            "traffic_factor": traffic_factor.values,
-        })
+        results = pd.DataFrame(
+            {
+                "bridge_id": df[id_col].values,
+                "priority_score": (
+                    self.severity_weight * severity
+                    + self.traffic_weight * traffic_factor
+                ).values,
+                "severity": severity.values,
+                "traffic_factor": traffic_factor.values,
+            }
+        )
         if "all_ratings_missing" in df.columns:
             results["all_ratings_missing"] = df["all_ratings_missing"].values
 

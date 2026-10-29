@@ -1,19 +1,24 @@
-from typing import List, Dict, Any, Tuple
-from civinlp.labels.weak_labeling import get_weak_label, get_severity_label
-from civinlp.labels.taxonomy import RoadDefectClass, RoadSeverity
+from typing import Any, Dict, List
+
+from civinlp.labels.taxonomy import RoadSeverity
+from civinlp.labels.weak_labeling import get_severity_label, get_weak_label
+
 
 class RuleBaseline:
     """
     Simple keyword-based baseline using the weak labeling logic.
     """
+
     def __init__(self):
         pass
-        
+
     def train(self, X, y):
         # Rules don't need training
         pass
-        
-    def predict(self, texts: List[str], metadatas: List[Dict[str, Any]] = None) -> List[str]:
+
+    def predict(
+        self, texts: List[str], metadatas: List[Dict[str, Any]] = None
+    ) -> List[str]:
         """
         Predict defect class for a list of texts.
         """
@@ -23,14 +28,14 @@ class RuleBaseline:
             # Here we assume text contains all info or we just use text
             descriptor = ""
             if metadatas and i < len(metadatas):
-                 descriptor = metadatas[i].get("descriptor", "")
-                 
+                descriptor = metadatas[i].get("descriptor", "")
+
             # Note: get_weak_label expects (complaint_type, descriptor)
-            # but here we might just have raw text. 
+            # but here we might just have raw text.
             # If text is the only input, we pass it as complaint_type to search keywords.
             label = get_weak_label(complaint_type=text, descriptor=descriptor)
             predictions.append(label)
-            
+
         return predictions
 
     def predict_severity(self, texts: List[str]) -> List[RoadSeverity]:
