@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from civinlp.data.split import time_based_split
+from civinlp.data.split import group_split, time_based_split
 from civinlp.eval.classification_metrics import compute_classification_report
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
@@ -19,6 +19,7 @@ class AblationRunner:
     """
 
     def __init__(self, data_path: str, split_method: str = "time"):
+        """split_method: "time" (chronological 70/10/20) or "area" (held-out zones)."""
         self.df = pd.read_parquet(data_path)
 
         # Generate weak labels if not present
@@ -50,6 +51,11 @@ class AblationRunner:
                     f"Time-based split failed ({e}), falling back to sequential split."
                 )
                 self._sequential_split()
+        elif split_method == "area" and "area_id" in self.df.columns:
+            # Hold out 20% of zones (and 10% for validation), not 20% of rows
+            self.train_df, self.val_df, self.test_df = group_split(
+                self.df, "area_id", test_frac=0.2, val_frac=0.1
+            )
         else:
             self._sequential_split()
 

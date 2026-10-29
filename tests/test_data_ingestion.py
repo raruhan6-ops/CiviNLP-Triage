@@ -93,7 +93,9 @@ def test_download_passes_limit_to_url(tmp_path, monkeypatch):
             }
         )
 
-    monkeypatch.setattr(pd, "read_csv", mock_read_csv)
+    import civinlp.data.download_roads_311 as mod
+
+    monkeypatch.setattr(mod, "fetch_csv", mock_read_csv)
     download_roads_311(str(tmp_path / "r.parquet"), limit=10)
     assert "%24limit=10" in seen["source"] or "$limit=10" in seen["source"]
     assert "nrows" not in seen["kwargs"]
@@ -129,7 +131,7 @@ def test_socrata_download_is_paged(tmp_path, monkeypatch):
             }
         )
 
-    monkeypatch.setattr(pd, "read_csv", mock_read_csv)
+    monkeypatch.setattr(mod, "fetch_csv", mock_read_csv)
     monkeypatch.setattr(mod, "PAGE_SIZE", 4)
     mod.download_roads_311(str(tmp_path / "r.parquet"), limit=20)
     assert calls == [(4, 0), (4, 4), (4, 8)]

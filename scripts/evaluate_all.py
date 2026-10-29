@@ -10,6 +10,7 @@ from civinlp.eval.ablation import AblationRunner
 from civinlp.eval.classification_metrics import compute_classification_report
 from civinlp.eval.error_analysis import generate_error_report, get_top_errors
 from civinlp.eval.outcome_eval import run_outcome_evaluation, weight_sensitivity
+from civinlp.eval.review_routing import routing_curve
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.calibrate import calibration_report
 from civinlp.models.tfidf_lr import TfidfBaseline
@@ -25,11 +26,14 @@ def evaluate_against_gold(runner, tfidf, gold_path):
 
     The gold CSV needs a `record_id` column plus `defect` and/or `severity` columns.
     Only gold rows NOT in the TF-IDF training split are scored.
+
+    Returns (results, routing): metrics per model, and the TF-IDF review-routing
+    curve against the hand labels (None if there are no defect labels).
     """
     gold = pd.read_csv(gold_path, dtype={"record_id": str})
     if "record_id" not in gold.columns or "record_id" not in runner.df.columns:
         print("Gold file and data both need a 'record_id' column; skipping.")
-        return None
+        return None, None
 
     train_ids = set(runner.train_df["record_id"].astype(str))
     df = runner.df.assign(record_id=runner.df["record_id"].astype(str))
@@ -37,13 +41,16 @@ def evaluate_against_gold(runner, tfidf, gold_path):
     merged = merged[~merged["record_id"].isin(train_ids)]
     if merged.empty:
         print("No gold rows outside the training split; skipping.")
-        return None
+        return None, None
 
     texts = merged["text"].fillna("").astype(str).tolist()
     rules = RuleBaseline()
     rows = []
+    routing = None
     if "defect" in merged.columns:
         y_true = merged["defect"].astype(str).str.lower().tolist()
+        conf = tfidf.predict_proba(texts).max(axis=1)
+        routing = routing_curve(y_true, tfidf.predict(texts), conf)
         for name, preds in [
             ("RuleBaseline", [p.value for p in rules.predict(texts)]),
             ("TF-IDF (defect)", tfidf.predict(texts)),
@@ -72,7 +79,7 @@ def evaluate_against_gold(runner, tfidf, gold_path):
                 "CriticalRecall": rep["critical_recall"],
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), routing
 
 
 def main():
@@ -92,6 +99,12 @@ def main():
         default=0.5,
         help="Fraction of the time range used as ranking history",
     )
+    parser.add_argument(
+        "--split",
+        choices=["time", "area"],
+        default="time",
+        help="Classification split: chronological, or held-out zones (20%% of areas)",
+    )
     args = parser.parse_args()
 
     set_global_seed(args.seed)
@@ -102,7 +115,7 @@ def main():
     # 1. Classification Ablations
     # ============================================================
     print("=== Running Classification Ablations ===")
-    runner = AblationRunner(args.data)
+    runner = AblationRunner(args.data, split_method=args.split)
 
     # Run all models (including transformer if available)
     transformer_path = (
@@ -151,17 +164,29 @@ def main():
     )
     print(calibration)
 
+    # Manual-review routing (RQ4): low-confidence predictions go to a reviewer
+    print("\n=== Review routing (TF-IDF defect, vs weak labels) ===")
+    routing = routing_curve(test_labels, y_pred_tfidf, confidences)
+    print(routing.round(3).to_string(index=False))
+    routing.to_csv(os.path.join(args.output_dir, "routing_weak.csv"), index=False)
+
     # ============================================================
     # 3. Gold-label Classification (independent of the rules)
     # ============================================================
-    gold_results = None
+    gold_results, gold_routing = None, None
     if args.gold:
         print("\n=== Evaluating against hand labels ===")
-        gold_results = evaluate_against_gold(runner, tfidf, args.gold)
+        gold_results, gold_routing = evaluate_against_gold(runner, tfidf, args.gold)
         if gold_results is not None:
             print(gold_results.to_string(index=False))
             gold_results.to_csv(
                 os.path.join(args.output_dir, "gold_results.csv"), index=False
+            )
+        if gold_routing is not None:
+            print("\nReview routing vs hand labels:")
+            print(gold_routing.round(3).to_string(index=False))
+            gold_routing.to_csv(
+                os.path.join(args.output_dir, "routing_gold.csv"), index=False
             )
 
     # ============================================================
@@ -175,32 +200,47 @@ def main():
         for s in rule_model.predict_severity(df["text"].fillna("").astype(str).tolist())
     ]
 
-    ranking_results, ranking_info = None, {}
+    ranking_evals = {}
+    outcomes = ["volume"] + (["resolution_days"] if "closed_date" in df.columns else [])
     if "area_id" in df.columns and "created_at" in df.columns:
-        try:
-            ranking_results, ranking_info = run_outcome_evaluation(
-                df, history_frac=args.history_frac, seed=args.seed
-            )
+        for outcome in outcomes:
+            suffix = "" if outcome == "volume" else f"_{outcome}"
+            try:
+                ranking_results, ranking_info = run_outcome_evaluation(
+                    df, history_frac=args.history_frac, seed=args.seed, outcome=outcome
+                )
+            except ValueError as e:
+                print(f"Skipping '{outcome}' ranking evaluation: {e}")
+                continue
+            print(f"\n--- Outcome: {outcome} ---")
             print(f"Ground truth: {ranking_info['relevance']}")
             print(
-                f"Cutoff {ranking_info['cutoff']}, {ranking_info['rankable_areas']} rankable areas, "
+                f"Cutoff {ranking_info['cutoff']}, "
+                f"{ranking_info['rankable_areas']} rankable areas, "
                 f"{ranking_info['critical_areas']} critical"
             )
-            print(ranking_results.to_string(index=False))
+            print(ranking_results.round(3).to_string(index=False))
             ranking_results.to_csv(
-                os.path.join(args.output_dir, "ranking_results.csv"), index=False
+                os.path.join(args.output_dir, f"ranking_results{suffix}.csv"),
+                index=False,
             )
 
             # Severity weight trade-off (alpha fixed at 1). Report it; don't tune
-            # beta to this metric, which rewards volume by construction.
-            sensitivity = weight_sensitivity(df, history_frac=args.history_frac)
-            print("\nPriority-score sensitivity to weights:")
+            # beta to one outcome metric.
+            sensitivity = weight_sensitivity(
+                df, history_frac=args.history_frac, outcome=outcome
+            )
+            print("Priority-score sensitivity to weights:")
             print(sensitivity.round(3).to_string(index=False))
             sensitivity.to_csv(
-                os.path.join(args.output_dir, "ranking_sensitivity.csv"), index=False
+                os.path.join(args.output_dir, f"ranking_sensitivity{suffix}.csv"),
+                index=False,
             )
-        except ValueError as e:
-            print(f"Skipping ranking evaluation: {e}")
+            ranking_evals[outcome] = {
+                **ranking_info,
+                "results": ranking_results.to_dict(orient="records"),
+                "sensitivity": sensitivity.to_dict(orient="records"),
+            }
     else:
         print("Need 'area_id' and 'created_at' columns; skipping ranking evaluation.")
 
@@ -219,15 +259,13 @@ def main():
         "gold_results": (
             gold_results.to_dict(orient="records") if gold_results is not None else None
         ),
-        "ranking_outcome_eval": {
-            **ranking_info,
-            "results": (
-                ranking_results.to_dict(orient="records")
-                if ranking_results is not None
-                else []
-            ),
-        },
+        "split": args.split,
+        "ranking_outcome_eval": ranking_evals,
         "calibration_tfidf_defect": calibration,
+        "review_routing_weak": routing.to_dict(orient="records"),
+        "review_routing_gold": (
+            gold_routing.to_dict(orient="records") if gold_routing is not None else None
+        ),
         "error_count": len(errors),
     }
 

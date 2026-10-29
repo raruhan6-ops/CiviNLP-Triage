@@ -51,7 +51,16 @@ python scripts/run_pipeline.py --transformer
 ### 1. Data Download
 
 ```bash
-python -m civinlp.data.download_roads_311 --limit 2000 --output data_raw/roads_311.parquet
+python -m civinlp.data.download_roads_311 --limit 20000 --output data_raw/roads_311.parquet
+```
+
+Only road complaint types are requested, in pages of 5,000 rows with retries. Results depend on the download date, because the API always returns the most recent requests.
+
+Bridges (optional; download a state's delimited NBI file from FHWA first):
+
+```bash
+python -m civinlp.data.download_nbi path/to/nbi.csv --output data_raw/bridges_nbi.parquet
+python -m civinlp.data.preprocess_bridges --input data_raw/bridges_nbi.parquet --output data_processed/bridges_processed.parquet
 ```
 
 ### 2. Preprocessing
@@ -74,7 +83,21 @@ python scripts/train_models.py --input data_processed/roads_processed.parquet --
 
 ```bash
 python scripts/evaluate_all.py --data data_processed/roads_processed.parquet --output_dir results/
+
+# Options
+#   --split area         hold out 20% of zones instead of the chronological split
+#   --gold labels.csv    score against hand labels (record_id, defect, severity)
+#   --history_frac 0.5   share of the time range used as ranking history
 ```
+
+What is evaluated against what:
+
+| Part | Ground truth |
+|:---|:---|
+| Classification F1 | Rule-generated weak labels: measures agreement with the rules only |
+| Classification with `--gold` | Hand labels |
+| Ranking | Future outcomes after a time cutoff: complaint volume per area, and median days to close |
+| Review routing | Accuracy of auto-handled vs. routed predictions at each confidence threshold |
 
 ### 5. Launch Dashboard
 
@@ -99,7 +122,7 @@ uvicorn civinlp.api.main:app --reload
 | NumPy | Set via `np.random.seed(42)` |
 | PyTorch | Set via `torch.manual_seed(42)` |
 | CUDA deterministic | `torch.backends.cudnn.deterministic = True` |
-| Data split | Time-based: 70% train / 10% val / 20% test |
+| Data split | Time-based 70/10/20 (default) or `--split area`: 20% of zones test, 10% val |
 
 ---
 
@@ -119,9 +142,15 @@ models/
     label_map.json
 
 results/
-  ablation_results.csv          # Model comparison table
-  error_analysis.csv            # Top misclassifications
-  evaluation_summary.json       # Comprehensive results JSON
+  ablation_results.csv                      # Model agreement with weak labels
+  error_analysis.csv                        # Top misclassifications
+  routing_weak.csv                          # Review routing vs weak labels
+  routing_gold.csv                          # Review routing vs hand labels (--gold)
+  gold_results.csv                          # Hand-label metrics (--gold)
+  ranking_results.csv                       # Ranking vs future complaint volume
+  ranking_results_resolution_days.csv       # Ranking vs future resolution time
+  ranking_sensitivity*.csv                  # Priority score across weight settings
+  evaluation_summary.json                   # Everything above in one JSON
 ```
 
 ---
@@ -133,12 +162,12 @@ Key pinned versions (see `pyproject.toml` for full list):
 | Package | Version |
 |:---|:---|
 | Python | ≥ 3.11 |
-| pandas | ≥ 2.0.0 |
+| pandas | ≥ 2.0.0, < 3.0 |
 | scikit-learn | ≥ 1.3.0 |
 | transformers | ≥ 4.30.0 |
 | torch | ≥ 2.0.0 |
 | fastapi | ≥ 0.100.0 |
-| streamlit | ≥ 1.24.0 |
+| streamlit | ≥ 1.46.0 |
 
 ---
 

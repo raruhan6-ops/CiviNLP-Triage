@@ -93,3 +93,56 @@ def test_weight_sensitivity_grid():
     assert len(out) == 2 and {"alpha", "beta", "ndcg@1", "spearman_vs_future"} <= set(
         out.columns
     )
+
+
+def test_resolution_days_outcome():
+    from civinlp.eval.outcome_eval import resolution_days
+
+    df = pd.DataFrame(
+        {
+            "area_id": ["A"] * 2 + ["B"] * 2 + ["A"] * 3 + ["B"] * 3 + ["C"],
+            "created_at": ["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-04"]
+            + ["2023-02-01"] * 3
+            + ["2023-02-01"] * 3
+            + ["2023-02-05"],
+            # Future: A closes in 1 day; B takes 10 days, one still open
+            "closed_date": [None] * 4
+            + ["2023-02-02"] * 3
+            + ["2023-02-11", "2023-02-11", None]
+            + ["2023-02-06"],
+        }
+    )
+    days = resolution_days(df.iloc[4:])
+    assert days.iloc[0] == 1.0
+    assert days.iloc[5] == 4.0  # open: censored at latest creation (Feb 5)
+
+    history, future, _ = temporal_outcome_split(df, cutoff="2023-02-01")
+    rel, critical = future_outcomes(
+        history, future, outcome="resolution_days", min_future=3, critical_frac=0.5
+    )
+    assert set(rel) == {"A", "B"}  # C not in history
+    assert rel["B"] == 10.0 and rel["A"] == 1.0
+    assert critical == {"B"}
+
+    with pytest.raises(ValueError):
+        future_outcomes(history, future, outcome="nope")
+
+
+def test_area_split_holds_out_zones(tmp_path):
+    from civinlp.eval.ablation import AblationRunner
+
+    df = pd.DataFrame(
+        {
+            "text": ["Street Condition - Pothole"] * 100,
+            "area_id": [f"Z{i % 10}" for i in range(100)],
+            "created_at": pd.date_range("2023-01-01", periods=100, freq="h"),
+        }
+    )
+    path = tmp_path / "d.parquet"
+    df.to_parquet(path)
+    runner = AblationRunner(str(path), split_method="area")
+    zones = [
+        set(x["area_id"]) for x in (runner.train_df, runner.val_df, runner.test_df)
+    ]
+    assert [len(z) for z in zones] == [7, 1, 2]
+    assert not (zones[0] & zones[2] or zones[1] & zones[2] or zones[0] & zones[1])

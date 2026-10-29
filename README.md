@@ -18,13 +18,13 @@
 - **Severity Prediction**: Infers issue severity (High/Medium/Low) using keyword-based heuristics.
 
 ### 🛡️ Robust Data Handling
-- **PII Redaction**: Built-in privacy protection automatically redacts emails and phone numbers from public datasets.
+- **PII Redaction**: Built-in privacy protection automatically redacts emails, phone numbers and street addresses from public datasets (names are not detected).
 - **Automated Ingestion**: CLI tools to download and normalize **NYC 311 Service Requests** and **NBI Bridge Data**.
 - **Schema Validation**: Ensures data integrity with strict Pydantic schemas.
 
 ### 📊 Intelligent Prioritization
 - **Risk Scoring**: Generates a unified priority score combining defect severity, complaint frequency, repeat rate, and model uncertainty.
-- **Uncertainty Calibration**: Uses Temperature Scaling to penalize low-confidence predictions, ensuring robust decision-making.
+- **Uncertainty Calibration & Review Routing**: Temperature scaling with ECE reporting; predictions below a confidence threshold are flagged for manual review (dashboard slider, routing curves in `results/`).
 - **Ranking Metrics**: Top-K Recall, NDCG@K, and Spearman correlation for evaluating prioritization quality.
 
 ### 🖥️ Interactive Dashboard
@@ -111,17 +111,24 @@ uvicorn civinlp.api.main:app --reload
 
 Real accuracy needs hand labels: pass a CSV with `record_id`, `defect`, `severity` columns via `--gold`.
 
-**Ranking** is scored against an outcome the rules never see. Areas are ranked using complaints *before* a time cutoff, and graded by how many new road complaints each area received *after* it. Example run (20,000 road complaints, Sep–Oct 2026, 193 ZIP areas, cutoff at the time midpoint):
+**Ranking** is scored against outcomes the rules never see. Areas are ranked using complaints *before* a time cutoff, then graded on what happened *after* it:
 
-| Ranking | NDCG@10 | Recall@20 | Spearman vs. future |
-| :--- | :--- | :--- | :--- |
-| Count only (H1) | 0.84 | 0.44 | 0.89 |
-| Recency (H2) | 0.63 | 0.28 | 0.53 |
-| Severity only (H3) | 0.06 | 0.10 | 0.18 |
-| **Priority score** (α=1, β=1) | 0.71 | 0.39 | 0.79 |
-| Random | 0.35 | 0.18 | 0.13 |
+- **Volume**: how many new road complaints each area received.
+- **Resolution time**: median days to close those complaints (still-open ones count as open until the end of the data; areas with fewer than 3 future complaints are left out).
 
-All score terms are scaled to [0, 1], so severity now changes the ranking. Against this volume-based outcome, more severity weight scores lower (Spearman 0.89 at β=0 down to 0.40 at β=4; see `results/ranking_sensitivity.csv`). The outcome rewards volume by construction, so β is a policy choice, not something to tune on this metric.
+Example run (20,000 road complaints, Sep 10 to Oct 28, 2026, 193 ZIP areas, cutoff at the time midpoint):
+
+| Ranking | Volume: NDCG@10 | Volume: Spearman | Resolution: NDCG@10 | Resolution: Spearman |
+| :--- | :--- | :--- | :--- | :--- |
+| Count only (H1) | 0.87 | 0.89 | 0.58 | 0.16 |
+| Recency (H2) | 0.49 | 0.45 | 0.28 | 0.05 |
+| Severity only (H3) | 0.04 | 0.17 | 0.61 | 0.21 |
+| **Priority score** (α=1, β=1) | 0.76 | 0.79 | 0.51 | **0.25** |
+| Random | 0.36 | 0.14 | 0.39 | -0.05 |
+
+The two outcomes pull in opposite directions. Past volume best predicts future volume, and more severity weight lowers that score (Spearman 0.89 at β=0, 0.45 at β=4). For resolution time, severity carries the signal, and the combined priority score correlates best. All score terms are scaled to [0, 1], and β=1 is a deliberate middle ground rather than a value tuned to either metric. The full weight sweeps are in `results/ranking_sensitivity*.csv`. Resolution time also reflects complaint-type mix (curb repairs take far longer than street repairs), so treat it as a second proxy, not ground truth.
+
+**Manual review (RQ4)**: predictions below a confidence threshold are routed to a reviewer. `results/routing_*.csv` reports, per threshold, coverage, accuracy of the automated share and the share of model errors caught. Against weak labels the model makes almost no errors, so this curve only becomes informative with `--gold` hand labels.
 
 To reproduce these results, run the ablation suite:
 ```bash
@@ -142,7 +149,7 @@ python scripts/evaluate_all.py
 - **Results**: Ablation tables, error analysis, and evaluation summaries.
 
 ### What is NOT Stored
-- Raw personal identifiers (emails, phone numbers — redacted before saving).
+- Raw personal identifiers (emails, phone numbers, street addresses — redacted before saving).
 - Full NYC 311 dataset (only a sample is downloaded; configurable via `--limit`).
 
 ---

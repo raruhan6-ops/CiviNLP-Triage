@@ -12,6 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
 from civinlp.data.download_roads_311 import download_roads_311
 from civinlp.data.preprocess_bridges import clean_bridges
 from civinlp.data.preprocess_roads import normalize_zip, preprocess_roads
+from civinlp.eval.review_routing import route_by_confidence
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
 from civinlp.ranking.bridge_priority import BridgePriorityScorer
@@ -78,6 +79,9 @@ data_source = st.sidebar.radio("Data Source", ["Use Sample Data", "Upload CSV"])
 model_choice = st.sidebar.selectbox(
     "Model",
     ["TF-IDF + Logistic Regression", "Rule Baseline"],
+)
+review_threshold = st.sidebar.slider(
+    "Manual review below confidence", 0.0, 1.0, 0.7, 0.05
 )
 
 
@@ -233,7 +237,17 @@ if "df" in st.session_state:
             st.success("Predictions complete!")
 
         if "pred_df" in st.session_state:
-            pred_df = st.session_state["pred_df"]
+            pred_df = st.session_state["pred_df"].copy()
+
+            # Route low-confidence predictions to manual review (RQ4)
+            pred_df["needs_review"] = route_by_confidence(
+                pred_df["confidence"], review_threshold
+            )
+            n_review = int(pred_df["needs_review"].sum())
+            st.write(
+                f"**{n_review}** of {len(pred_df)} predictions are below the "
+                f"{review_threshold:.2f} confidence threshold and need manual review."
+            )
 
             # Display columns
             display_cols = [
@@ -241,6 +255,7 @@ if "df" in st.session_state:
                 "predicted_defect",
                 "predicted_severity",
                 "confidence",
+                "needs_review",
             ]
             display_cols = [c for c in display_cols if c in pred_df.columns]
             st.dataframe(pred_df[display_cols].head(100), width="stretch")

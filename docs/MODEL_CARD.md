@@ -105,5 +105,5 @@ CiviNLP Triage includes three model tiers for road defect classification, plus a
 > **⚠️ Decision-Support Only**: This tool supports maintenance triage and **does not replace engineering judgment**. All prioritized lists should be reviewed by qualified engineers before field action.
 
 - Predictions are based on text analysis and structural ratings, not physical inspection.
-- Model confidence should be used to flag uncertain cases for manual review.
+- Model confidence should be used to flag uncertain cases for manual review. The dashboard flags predictions below a configurable threshold, and `evaluate_all.py` reports coverage vs. accuracy for each threshold (`results/routing_*.csv`).
 - See [ETHICS_AND_LIMITATIONS.md](ETHICS_AND_LIMITATIONS.md) for full details.

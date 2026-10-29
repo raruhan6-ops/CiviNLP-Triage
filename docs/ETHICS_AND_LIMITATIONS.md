@@ -32,7 +32,7 @@ CiviNLP Triage is a **decision-support prototype** designed for research and ope
 ## Privacy and Data Governance
 
 ### PII Handling
-- The tool includes automatic PII redaction (emails and phone numbers) before saving processed data.
+- The tool includes automatic PII redaction (emails, phone numbers, street addresses) before saving processed data. Personal names are not detected; the NYC 311 fields used (complaint type, descriptor) contain no free text, but any free-text source added later needs NER-based redaction.
 - Raw text containing potential personal information is never stored without redaction.
 - A configuration flag can disable text storage entirely, keeping only embeddings and predictions.
 

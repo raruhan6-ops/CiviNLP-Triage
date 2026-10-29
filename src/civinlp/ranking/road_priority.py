@@ -144,6 +144,12 @@ class RoadPriorityScorer:
             raise ValueError("Dataframe must have 'area_id'")
 
         # Optional time window grouping
+        # Parse timestamps once for the whole frame, not once per area
+        if "created_at" in df.columns and not pd.api.types.is_datetime64_any_dtype(
+            df["created_at"]
+        ):
+            df = df.assign(created_at=pd.to_datetime(df["created_at"], errors="coerce"))
+
         group_cols = ["area_id"]
         if time_window and "created_at" in df.columns:
             try:

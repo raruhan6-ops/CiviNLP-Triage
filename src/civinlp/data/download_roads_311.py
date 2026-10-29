@@ -1,8 +1,10 @@
 import argparse
+import io
 import logging
 import time
 from typing import Optional
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.request import urlopen
 
 import pandas as pd
 
@@ -58,6 +60,15 @@ def build_311_url(
 # Default URL: latest road-related NYC 311 requests
 NYC_311_URL = build_311_url()
 PAGE_SIZE = 5000
+REQUEST_TIMEOUT = 60  # seconds without data before a page is retried
+
+
+def fetch_csv(
+    url: str, timeout: float = REQUEST_TIMEOUT, **read_kwargs
+) -> pd.DataFrame:
+    """GET a CSV with a socket timeout (pd.read_csv on a URL can hang forever)."""
+    with urlopen(url, timeout=timeout) as response:
+        return pd.read_csv(io.BytesIO(response.read()), **read_kwargs)
 
 
 def read_socrata_paged(
@@ -75,7 +86,7 @@ def read_socrata_paged(
         url = build_311_url(base_url, n, offset)
         for attempt in range(1, retries + 1):
             try:
-                page = pd.read_csv(url, **read_kwargs)
+                page = fetch_csv(url, **read_kwargs)
                 break
             except Exception as e:
                 if attempt == retries:
