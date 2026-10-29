@@ -82,7 +82,8 @@ def area_based_split(
         area_column: Name of the area column.
         test_areas: Explicit list of area_ids to hold out for test.
         test_frac: Approximate fraction of data to reserve for test if test_areas not given.
-        val_frac: Fraction of remaining (non-test) data to use for validation.
+        val_frac: Fraction of ALL rows to use for validation, drawn from the
+            non-test areas (capped so at least one training row remains).
         seed: Random seed for area selection.
 
     Returns:
@@ -116,8 +117,9 @@ def area_based_split(
     remaining = df[~test_mask].copy()
 
     # Split remaining into train/val
-    val_size = int(len(remaining) * val_frac / (1.0 - test_frac + 1e-9))
-    val_size = min(val_size, len(remaining) - 1)
+    # Based on total rows so it stays correct when test_areas is given explicitly
+    val_size = int(round(len(df) * val_frac))
+    val_size = max(0, min(val_size, len(remaining) - 1))
 
     val_df = remaining.sample(n=val_size, random_state=seed)
     train_df = remaining.drop(val_df.index)

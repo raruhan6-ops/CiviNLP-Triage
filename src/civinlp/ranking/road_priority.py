@@ -126,13 +126,12 @@ class RoadPriorityScorer:
                 logger.warning(f"Time window grouping failed: {e}")
 
         scores = []
+        # Grouping by a list always yields tuple keys (pandas >= 2), even for one column
         for group_key, group in df.groupby(group_cols):
+            if not isinstance(group_key, tuple):
+                group_key = (group_key,)
             result = self.score_area(group)
-            if len(group_cols) > 1 and isinstance(group_key, tuple):
-                result["area_id"] = group_key[0]
-                result["time_window"] = group_key[1]
-            else:
-                result["area_id"] = group_key
+            result.update(dict(zip(group_cols, group_key)))
             scores.append(result)
 
         results = pd.DataFrame(scores).sort_values("priority_score", ascending=False)

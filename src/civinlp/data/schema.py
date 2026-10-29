@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 import pandas as pd
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 class RoadRecord(BaseModel):
     """Internal schema for a road defect record."""
@@ -12,8 +12,7 @@ class RoadRecord(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     # Flexible schema to allow extra fields during ingestion
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class BridgeRecord(BaseModel):
@@ -27,8 +26,7 @@ class BridgeRecord(BaseModel):
     traffic: Optional[float] = None
     derived_severity: Optional[float] = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class PredictionOutput(BaseModel):
@@ -41,6 +39,25 @@ class PredictionOutput(BaseModel):
     explanation: Optional[List[str]] = None
     priority_score: Optional[float] = None
     priority_rank: Optional[int] = None
+
+
+# NYC 311 complaint types that describe road/street infrastructure.
+# Potholes are a descriptor under "Street Condition", not a complaint type.
+ROAD_COMPLAINT_TYPES = [
+    "Street Condition",
+    "Highway Condition",
+    "Curb Condition",
+    "Sidewalk Condition",
+    "Street Sign - Damaged",
+    "Street Sign - Missing",
+    "Street Sign - Dangling",
+]
+
+
+def is_road_complaint(complaint_type) -> bool:
+    """Case-insensitive check against ROAD_COMPLAINT_TYPES (plus generic 'pothole')."""
+    value = str(complaint_type).strip().lower()
+    return value in {t.lower() for t in ROAD_COMPLAINT_TYPES} or "pothole" in value
 
 
 class RawRoadSchema:

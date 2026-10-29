@@ -39,5 +39,4 @@ ranking:
 
 severity:
   method: keywords  # "keywords", "resolution_time", or "repeat_complaints"
-  high_keywords: ["collapse", "sinkhole", "cave", "hazard", "danger", "emergency", "flood", "major", "severe", "urgent", "impassable", "accident"]
-  medium_keywords: ["crack", "rough", "damage", "broken", "large", "deep", "multiple", "deteriorat", "erosion", "uneven", "bump"]
+  # Keyword lists live in civinlp/labels/weak_labeling.py (single source of truth).

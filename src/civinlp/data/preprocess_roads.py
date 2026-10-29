@@ -1,4 +1,5 @@
 import argparse
+import re
 import pandas as pd
 import logging
 from tqdm import tqdm
@@ -7,20 +8,39 @@ from pathlib import Path
 from civinlp.utils.io import load_parquet, save_parquet
 from civinlp.utils.text_clean import clean_text
 from civinlp.utils.pii_redaction import redact_pii
-from civinlp.data.schema import RawRoadSchema
+from civinlp.data.schema import RawRoadSchema, is_road_complaint
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 tqdm.pandas()
 
-def preprocess_roads(input_path: str, output_path: str):
+
+def normalize_zip(value) -> str:
+    """Normalise a ZIP code to 5 digits ("10001.0" -> "10001", 7001.0 -> "07001")."""
+    if value is None or pd.isna(value):
+        return "UNKNOWN"
+    s = str(value).strip()
+    match = re.fullmatch(r"(\d{1,5})(?:\.0+)?", s) or re.match(r"(\d{5})(?:-\d{4})?$", s)
+    if not match:
+        return "UNKNOWN"
+    return match.group(1).zfill(5)
+
+
+def preprocess_roads(input_path: str, output_path: str, road_only: bool = True):
     """
     Load raw road data, clean text, redact PII, and save processed data.
+
+    If `road_only` is True, rows whose complaint_type is not road-related are dropped.
     """
     logger.info(f"Loading raw data from {input_path}")
     df = load_parquet(input_path)
-    
+
+    if road_only and "complaint_type" in df.columns:
+        before = len(df)
+        df = df[df["complaint_type"].map(is_road_complaint)].reset_index(drop=True)
+        logger.info(f"Kept {len(df)}/{before} road-related rows")
+
     # Ensure text column exists (concatenating Complaint Type, Descriptor)
     # Note: 'text' field is primary input. 
     # We might want to construct it if it doesn't exist, but spec says "text: string (concatenated relevant text fields)"
@@ -53,7 +73,7 @@ def preprocess_roads(input_path: str, output_path: str):
     
     # Ensure area_id (use Incident Zip if available)
     if 'incident_zip' in df.columns:
-        df['area_id'] = df['incident_zip'].fillna('UNKNOWN').astype(str)
+        df['area_id'] = df['incident_zip'].map(normalize_zip)
     else:
         df['area_id'] = 'UNKNOWN'
         
@@ -68,6 +88,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess Road Data")
     parser.add_argument("--input", type=str, default="data_raw/roads_311.parquet")
     parser.add_argument("--output", type=str, default="data_processed/roads_processed.parquet")
-    
+    parser.add_argument("--keep-all", action="store_true", help="Keep non-road complaint types")
+
     args = parser.parse_args()
-    preprocess_roads(args.input, args.output)
+    preprocess_roads(args.input, args.output, road_only=not args.keep_all)

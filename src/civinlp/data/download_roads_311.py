@@ -2,39 +2,68 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import logging
 
 from civinlp.utils.io import save_parquet, load_csv
-from civinlp.data.schema import RawRoadSchema
+from civinlp.data.schema import RawRoadSchema, ROAD_COMPLAINT_TYPES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Default URL for NYC 311 data (last 1000 records example)
-NYC_311_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.csv?$limit=2000&$order=created_date%20DESC"
+NYC_311_RESOURCE = "https://data.cityofnewyork.us/resource/erm2-nwe9.csv"
+DEFAULT_LIMIT = 2000
+
+
+def build_311_url(
+    base_url: str = NYC_311_RESOURCE, limit: Optional[int] = DEFAULT_LIMIT
+) -> str:
+    """
+    Build a Socrata query URL restricted to road-related complaint types.
+
+    Existing query parameters in `base_url` are kept, except `$limit`, which is
+    overridden when `limit` is given.
+    """
+    parts = urlsplit(base_url)
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if "$where" not in params:
+        types = ",".join(f"'{t}'" for t in ROAD_COMPLAINT_TYPES)
+        params["$where"] = f"complaint_type in({types})"
+    params.setdefault("$order", "created_date DESC")
+    if limit:
+        params["$limit"] = str(limit)
+    query = urlencode(params, quote_via=quote, safe="$,'()")
+    return urlunsplit(parts._replace(query=query))
+
+
+# Default URL: latest road-related NYC 311 requests
+NYC_311_URL = build_311_url()
+
 
 def download_roads_311(output_path: str, source_url_or_path: Optional[str] = None, limit: Optional[int] = None):
     """
     Download or load NYC 311 data, simple validation, and save to Parquet.
-    
+
     Args:
         output_path: Destination for the raw parquet file.
         source_url_or_path: URL or local path to CSV. If None, uses default NYC Open Data URL.
         limit: Max rows to load (mostly for testing).
     """
-    source = source_url_or_path or NYC_311_URL
-    
-    if limit and "http" in source and "$limit" not in source:
-        source += f"&$limit={limit}"
-    
+    source = source_url_or_path or NYC_311_RESOURCE
+    is_url = source.startswith(("http://", "https://"))
+
+    if is_url and "data.cityofnewyork.us/resource/" in source:
+        source = build_311_url(source, limit or DEFAULT_LIMIT)
+
     logger.info(f"Fetching data from {source}...")
-    
-    # Read CSV (pandas handles URLs seamlessly)
+
+    # Read CSV (pandas handles URLs seamlessly). Keep ZIP codes as strings so
+    # missing values don't turn them into floats like "10001.0".
+    read_kwargs = {"dtype": {"incident_zip": str}}
+    if limit and not is_url:
+        read_kwargs["nrows"] = limit
     try:
-        if limit:
-            df = pd.read_csv(source, nrows=limit)
-        else:
-            df = pd.read_csv(source)
+        df = pd.read_csv(source, **read_kwargs)
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
         raise
