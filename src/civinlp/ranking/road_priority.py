@@ -11,9 +11,16 @@ class RoadPriorityScorer:
     """
     Computes priority scores for road segments or areas.
 
-    Formula: priority = α·recent_count + β·avg_severity + γ·repeat_rate - δ·uncertainty_penalty
+    Formula: priority = α·count_norm + β·severity_norm + γ·repeat_rate - δ·uncertainty_penalty
+
+    Every term is scaled to [0, 1] so the weights are comparable:
+      - count_norm    = log(1 + count) / log(1 + max_count over ranked areas)
+      - severity_norm = (avg_severity - 1) / 2   (low=1 -> 0, high=3 -> 1)
+      - repeat_rate and uncertainty_penalty are already fractions.
+    Without this, the raw count dominated (50 minor complaints beat 5 severe
+    ones whatever beta was).
     """
-    def __init__(self, alpha=1.0, beta=2.0, gamma=0.5, delta=1.0):
+    def __init__(self, alpha=1.0, beta=1.0, gamma=0.5, delta=0.5):
         self.alpha = alpha  # weight for count
         self.beta = beta    # weight for severity
         self.gamma = gamma  # weight for repeat rate
@@ -33,9 +40,14 @@ class RoadPriorityScorer:
         }
         return severity_map.get(severity, 1)
 
-    def score_area(self, area_df: pd.DataFrame) -> Dict[str, Any]:
+    def score_area(self, area_df: pd.DataFrame, max_count: Optional[int] = None) -> Dict[str, Any]:
         """
         Score an area based on a DataFrame of complaints in that area.
+
+        Args:
+            area_df: Complaints in the area.
+            max_count: Largest area count in the set being ranked (for count
+                normalisation). Defaults to this area's own count.
 
         Returns:
             Dict with priority_score and contributing factor details.
@@ -70,18 +82,22 @@ class RoadPriorityScorer:
         else:
             uncertainty_penalty = 0.0
 
+        max_count = max(max_count or count, count)
+        count_norm = float(np.log1p(count) / np.log1p(max_count))
+        severity_norm = (avg_severity - 1.0) / 2.0
+
         # Priority formula
         score = (
-            self.alpha * count
-            + self.beta * avg_severity
+            self.alpha * count_norm
+            + self.beta * severity_norm
             + self.gamma * repeat_rate
             - self.delta * uncertainty_penalty
         )
         score = max(0.0, score)
 
         rationale = (
-            f"count={count} (×{self.alpha}), "
-            f"avg_sev={avg_severity:.2f} (×{self.beta}), "
+            f"count={count} [{count_norm:.2f}] (×{self.alpha}), "
+            f"avg_sev={avg_severity:.2f} [{severity_norm:.2f}] (×{self.beta}), "
             f"repeat={repeat_rate:.2f} (×{self.gamma}), "
             f"unc_pen={uncertainty_penalty:.2f} (×{self.delta})"
         )
@@ -89,7 +105,9 @@ class RoadPriorityScorer:
         return {
             "priority_score": score,
             "count": count,
+            "count_norm": count_norm,
             "avg_severity": avg_severity,
+            "severity_norm": severity_norm,
             "repeat_rate": repeat_rate,
             "uncertainty_penalty": uncertainty_penalty,
             "rationale": rationale,
@@ -126,11 +144,13 @@ class RoadPriorityScorer:
                 logger.warning(f"Time window grouping failed: {e}")
 
         scores = []
+        groups = df.groupby(group_cols)
+        max_count = int(groups.size().max()) if len(df) else 0
         # Grouping by a list always yields tuple keys (pandas >= 2), even for one column
-        for group_key, group in df.groupby(group_cols):
+        for group_key, group in groups:
             if not isinstance(group_key, tuple):
                 group_key = (group_key,)
-            result = self.score_area(group)
+            result = self.score_area(group, max_count=max_count)
             result.update(dict(zip(group_cols, group_key)))
             scores.append(result)
 

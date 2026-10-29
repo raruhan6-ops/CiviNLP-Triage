@@ -57,8 +57,8 @@ graph LR
 Clone the repository and install the package with development dependencies:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/civinlp-triage.git
-cd civinlp-triage
+git clone https://github.com/raruhan6-ops/CiviNLP-Triage.git
+cd CiviNLP-Triage
 pip install -e .[dev]
 ```
 
@@ -118,10 +118,10 @@ Real accuracy needs hand labels: pass a CSV with `record_id`, `defect`, `severit
 | Count only (H1) | 0.84 | 0.44 | 0.89 |
 | Recency (H2) | 0.63 | 0.28 | 0.53 |
 | Severity only (H3) | 0.06 | 0.10 | 0.18 |
-| **Priority score** | 0.84 | 0.44 | 0.89 |
+| **Priority score** (α=1, β=1) | 0.71 | 0.39 | 0.79 |
 | Random | 0.35 | 0.18 | 0.13 |
 
-The priority score currently tracks complaint count almost exactly; the severity term adds little (see issue on score scaling).
+All score terms are scaled to [0, 1], so severity now changes the ranking. Against this volume-based outcome, more severity weight scores lower (Spearman 0.89 at β=0 down to 0.40 at β=4; see `results/ranking_sensitivity.csv`). The outcome rewards volume by construction, so β is a policy choice, not something to tune on this metric.
 
 To reproduce these results, run the ablation suite:
 ```bash

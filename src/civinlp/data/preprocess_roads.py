@@ -10,7 +10,6 @@ from civinlp.utils.text_clean import clean_text
 from civinlp.utils.pii_redaction import redact_pii
 from civinlp.data.schema import RawRoadSchema, is_road_complaint
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 tqdm.pandas()
@@ -85,6 +84,7 @@ def preprocess_roads(input_path: str, output_path: str, road_only: bool = True):
     logger.info(f"Saved processed data to {output_path}")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Preprocess Road Data")
     parser.add_argument("--input", type=str, default="data_raw/roads_311.parquet")
     parser.add_argument("--output", type=str, default="data_processed/roads_processed.parquet")

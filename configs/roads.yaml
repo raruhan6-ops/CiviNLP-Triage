@@ -31,10 +31,11 @@ models:
     learning_rate: 5.0e-5
 
 ranking:
+  # All terms are scaled to [0, 1] before weighting (see road_priority.py)
   alpha: 1.0   # count weight
-  beta: 2.0    # severity weight
+  beta: 1.0    # severity weight
   gamma: 0.5   # repeat rate weight
-  delta: 1.0   # uncertainty penalty weight
+  delta: 0.5   # uncertainty penalty weight
   time_window: null  # null, "D" (daily), "W" (weekly)
 
 severity:

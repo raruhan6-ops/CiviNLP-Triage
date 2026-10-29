@@ -3,7 +3,7 @@ name = "civinlp-triage"
 version = "0.1.0"
 description = "A reproducible NLP decision-support tool for road and bridge maintenance prioritization."
 authors = [
-    {name = "User", email = "user@example.com"},
+    {name = "Rejuan Ahmed Ruhan", email = "ra.ruhan6@gmail.com"},
 ]
 dependencies = [
     "pandas>=2.0.0,<3.0",

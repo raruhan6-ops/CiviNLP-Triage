@@ -16,7 +16,6 @@ import pandas as pd
 
 from civinlp.utils.io import load_parquet, save_parquet
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 NBI_COLUMN_MAPPING = {
@@ -116,6 +115,7 @@ def _already_decimal(series: pd.Series) -> bool:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Preprocess NBI Bridge Data")
     parser.add_argument("--input", type=str, default="data_raw/bridges_nbi.parquet")
     parser.add_argument("--output", type=str, default="data_processed/bridges_processed.parquet")

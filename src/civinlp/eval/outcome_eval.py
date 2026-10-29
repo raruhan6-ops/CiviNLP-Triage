@@ -175,3 +175,33 @@ def run_outcome_evaluation(
         "relevance": "future road-complaint count per area (linear-gain NDCG)",
     }
     return results, info
+
+
+def weight_sensitivity(
+    df: pd.DataFrame,
+    grid: Optional[List[Dict[str, float]]] = None,
+    area_column: str = "area_id",
+    time_column: str = "created_at",
+    history_frac: float = 0.5,
+    critical_frac: float = 0.2,
+    k_values: Optional[List[int]] = None,
+) -> pd.DataFrame:
+    """
+    Evaluate the priority score over a grid of weights on one fixed split.
+
+    Each grid entry is a dict of RoadPriorityScorer kwargs (alpha, beta, gamma, delta).
+    The default grid varies the severity weight beta with alpha fixed at 1.
+    """
+    if grid is None:
+        grid = [{"alpha": 1.0, "beta": b} for b in [0.0, 0.25, 0.5, 1.0, 2.0, 4.0]]
+        grid.append({"alpha": 0.0, "beta": 1.0})
+
+    history, future, _ = temporal_outcome_split(df, time_column, history_frac)
+    counts, critical = future_outcomes(history, future, area_column, critical_frac)
+
+    rows = []
+    for weights in grid:
+        ranked = baseline_rankings(history, area_column, time_column, RoadPriorityScorer(**weights))
+        result = evaluate_rankings({"priority": ranked["priority"]}, counts, critical, k_values)
+        rows.append({**weights, **result.drop(columns=["ranking"]).iloc[0].to_dict()})
+    return pd.DataFrame(rows)

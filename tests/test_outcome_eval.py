@@ -73,3 +73,11 @@ def test_severity_enum_str_matches_scorer():
     # str() of the enum must be the plain value so string lookups work
     assert str(RoadSeverity.HIGH) == "high"
     assert RoadPriorityScorer()._severity_to_numeric(str(RoadSeverity.HIGH)) == 3
+
+
+def test_weight_sensitivity_grid():
+    from civinlp.eval.outcome_eval import weight_sensitivity
+
+    grid = [{"alpha": 1.0, "beta": 0.0}, {"alpha": 0.0, "beta": 1.0}]
+    out = weight_sensitivity(_make_df(), grid=grid, k_values=[1])
+    assert len(out) == 2 and {"alpha", "beta", "ndcg@1", "spearman_vs_future"} <= set(out.columns)

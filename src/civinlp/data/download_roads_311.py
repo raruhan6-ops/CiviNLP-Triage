@@ -9,7 +9,6 @@ import time
 from civinlp.utils.io import save_parquet, load_csv
 from civinlp.data.schema import RawRoadSchema, ROAD_COMPLAINT_TYPES
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 NYC_311_RESOURCE = "https://data.cityofnewyork.us/resource/erm2-nwe9.csv"
@@ -123,6 +122,7 @@ def download_roads_311(output_path: str, source_url_or_path: Optional[str] = Non
     logger.info(f"Saved raw data to {output_path}")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Download NYC 311 Road Data")
     parser.add_argument("--output", type=str, default="data_raw/roads_311.parquet", help="Output path")
     parser.add_argument("--source", type=str, help="Local CSV path or URL")

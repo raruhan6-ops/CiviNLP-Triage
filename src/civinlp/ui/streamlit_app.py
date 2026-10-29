@@ -90,32 +90,56 @@ def load_sample_data():
     return load_parquet(proc_path)
 
 
+@st.cache_resource
+def _load_tfidf(model_path: str):
+    """Load the TF-IDF model once per process, not on every rerun."""
+    return TfidfBaseline.load(model_path)
+
+
 def load_model(choice: str):
     """Load the selected model."""
     if choice == "TF-IDF + Logistic Regression":
         model_path = Path("models/tfidf_baseline.joblib")
         if model_path.exists():
-            return TfidfBaseline.load(model_path)
+            return _load_tfidf(str(model_path))
         else:
             st.warning("TF-IDF model not found. Falling back to Rule Baseline.")
             return RuleBaseline()
     return RuleBaseline()
 
 
+def set_data(df: pd.DataFrame, key) -> bool:
+    """Store a new dataset; drop predictions made on a different one. Returns True if new."""
+    if st.session_state.get("data_key") == key:
+        return False
+    st.session_state["df"] = df
+    st.session_state["data_key"] = key
+    st.session_state.pop("pred_df", None)
+    return True
+
+
 # ─── Main Flow ────────────────────────────────────────────────────────────────
+
+# Switching data source clears data and predictions from the previous source
+if st.session_state.get("data_source") != data_source:
+    for k in ("df", "pred_df", "data_key"):
+        st.session_state.pop(k, None)
+    st.session_state["data_source"] = data_source
 
 if data_source == "Use Sample Data":
     if st.sidebar.button("🔄 Load/Refresh Data"):
         try:
             df = load_sample_data()
-            st.session_state['df'] = df
+            st.session_state.pop("data_key", None)  # explicit refresh always reloads
+            set_data(df, "sample")
             st.success(f"✅ Loaded {len(df)} records from sample data.")
         except Exception as e:
             st.error(f"Error loading data: {e}")
 
 elif data_source == "Upload CSV":
     uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=["csv"])
-    if uploaded_file is not None:
+    upload_key = ("upload", uploaded_file.name, uploaded_file.size) if uploaded_file is not None else None
+    if uploaded_file is not None and st.session_state.get("data_key") != upload_key:
         try:
             df = pd.read_csv(uploaded_file)
             # Ensure 'text' column exists
@@ -133,7 +157,7 @@ elif data_source == "Upload CSV":
                         break
                 else:
                     df['area_id'] = 'UNKNOWN'
-            st.session_state['df'] = df
+            set_data(df, upload_key)
             st.success(f"✅ Uploaded {len(df)} records.")
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
@@ -207,7 +231,7 @@ if "df" in st.session_state:
                 model_path = Path("models/tfidf_baseline.joblib")
                 if model_path.exists():
                     try:
-                        loaded_model = TfidfBaseline.load(model_path)
+                        loaded_model = _load_tfidf(str(model_path))
                         top_features = loaded_model.get_top_features(n=5)
                         st.write("**Top TF-IDF Features per Class**")
                         for cls, features in top_features.items():

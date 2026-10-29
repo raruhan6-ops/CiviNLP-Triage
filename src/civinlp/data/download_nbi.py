@@ -6,7 +6,6 @@ import logging
 from civinlp.utils.io import save_parquet, load_csv
 from civinlp.data.schema import BridgeSchema
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def load_nbi_data(input_csv: str, output_path: str):
@@ -26,6 +25,7 @@ def load_nbi_data(input_csv: str, output_path: str):
     logger.info(f"Saved raw NBI data to {output_path}")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Load NBI Bridge Data")
     parser.add_argument("input_csv", type=str, help="Path to input NBI CSV file")
     parser.add_argument("--output", type=str, default="data_raw/bridges_nbi.parquet", help="Output path")

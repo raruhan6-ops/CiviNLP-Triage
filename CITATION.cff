@@ -3,10 +3,10 @@ message: "If you use this software, please cite it as below."
 title: "CiviNLP Triage: Road & Bridge Maintenance Prioritization Tool"
 type: software
 authors:
-  - name: "CiviNLP Triage Contributors"
+  - name: "Rejuan Ahmed Ruhan"
 version: "0.1.0"
-date-released: "2024-01-01"
-url: "https://github.com/YOUR_USERNAME/civinlp-triage"
+date-released: "2026-10-29"
+url: "https://github.com/raruhan6-ops/CiviNLP-Triage"
 license: MIT
 keywords:
   - NLP

@@ -17,8 +17,8 @@ This document provides exact commands to reproduce all CiviNLP Triage results fr
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/civinlp-triage.git
-cd civinlp-triage
+git clone https://github.com/raruhan6-ops/CiviNLP-Triage.git
+cd CiviNLP-Triage
 
 # Create virtual environment
 python -m venv .venv

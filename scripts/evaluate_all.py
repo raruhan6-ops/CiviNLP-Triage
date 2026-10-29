@@ -8,10 +8,12 @@ from pathlib import Path
 from civinlp.eval.ablation import AblationRunner
 from civinlp.eval.error_analysis import get_top_errors, generate_error_report
 from civinlp.eval.classification_metrics import compute_classification_report
-from civinlp.eval.outcome_eval import run_outcome_evaluation
+from civinlp.eval.outcome_eval import run_outcome_evaluation, weight_sensitivity
 from civinlp.models.baseline_rules import RuleBaseline
+from civinlp.models.calibrate import calibration_report
 from civinlp.models.tfidf_lr import TfidfBaseline
 from civinlp.utils.seed import set_global_seed
+from civinlp.utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,7 @@ def main():
     args = parser.parse_args()
 
     set_global_seed(args.seed)
+    setup_logging(name="evaluate")
     os.makedirs(args.output_dir, exist_ok=True)
 
     # ============================================================
@@ -105,6 +108,17 @@ def main():
         print(errors[['text', 'y_true', 'y_pred', 'confidence']].head().to_string(index=False))
     generate_error_report(errors, os.path.join(args.output_dir, "error_analysis.csv"))
 
+    # Calibration: temperature fitted on validation, ECE on test (vs weak labels)
+    print("\n=== Calibration (TF-IDF defect) ===")
+    calibration = calibration_report(
+        tfidf.predict_proba(runner.val_df['text'].fillna("").astype(str).tolist()),
+        [str(l) for l in runner.val_df['label'].tolist()],
+        proba,
+        test_labels,
+        tfidf.classes_,
+    )
+    print(calibration)
+
     # ============================================================
     # 3. Gold-label Classification (independent of the rules)
     # ============================================================
@@ -137,6 +151,13 @@ def main():
                   f"{ranking_info['critical_areas']} critical")
             print(ranking_results.to_string(index=False))
             ranking_results.to_csv(os.path.join(args.output_dir, "ranking_results.csv"), index=False)
+
+            # Severity weight trade-off (alpha fixed at 1). Report it; don't tune
+            # beta to this metric, which rewards volume by construction.
+            sensitivity = weight_sensitivity(df, history_frac=args.history_frac)
+            print("\nPriority-score sensitivity to weights:")
+            print(sensitivity.round(3).to_string(index=False))
+            sensitivity.to_csv(os.path.join(args.output_dir, "ranking_sensitivity.csv"), index=False)
         except ValueError as e:
             print(f"Skipping ranking evaluation: {e}")
     else:
@@ -159,6 +180,7 @@ def main():
             **ranking_info,
             "results": ranking_results.to_dict(orient="records") if ranking_results is not None else [],
         },
+        "calibration_tfidf_defect": calibration,
         "error_count": len(errors),
     }
 

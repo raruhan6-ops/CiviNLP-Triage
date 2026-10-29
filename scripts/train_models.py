@@ -10,11 +10,12 @@ from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.models.tfidf_lr import TfidfBaseline
 from civinlp.utils.io import load_parquet
 from civinlp.utils.seed import set_global_seed
+from civinlp.utils.logging_config import setup_logging
 from civinlp.data.split import time_based_split
 from civinlp.labels.taxonomy import RoadDefectClass
 
 
-def train_eval_all(data_path: str, train_transformer: bool = False, seed: int = 42):
+def train_eval_all(data_path: str, train_transformer: bool = False, seed: int = 42, epochs: int = 3):
     set_global_seed(seed)
     print(f"Loading data from {data_path}")
     df = load_parquet(data_path)
@@ -87,7 +88,7 @@ def train_eval_all(data_path: str, train_transformer: bool = False, seed: int = 
             labels=train_indices,
             val_texts=val_texts if val_texts else None,
             val_labels=val_indices if val_texts else None,
-            epochs=2,
+            epochs=epochs,
         )
         clf.save("models/distilbert_finetuned")
         print("Saved Transformer model with label map.")
@@ -100,6 +101,8 @@ if __name__ == "__main__":
     parser.add_argument("--input", default="data_processed/roads_processed.parquet")
     parser.add_argument("--transformer", action="store_true", help="Train transformer model")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--epochs", type=int, default=3, help="Transformer epochs (configs/roads.yaml)")
     args = parser.parse_args()
+    setup_logging(name="train")
 
-    train_eval_all(args.input, args.transformer, args.seed)
+    train_eval_all(args.input, args.transformer, args.seed, args.epochs)

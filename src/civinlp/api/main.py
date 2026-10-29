@@ -1,15 +1,39 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+import hmac
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# Max records per request (override with CIVINLP_MAX_BATCH)
+MAX_BATCH = int(os.environ.get("CIVINLP_MAX_BATCH", "1000"))
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    """
+    If CIVINLP_API_KEY is set, require a matching X-API-Key header.
+    Unset (the default, for local use), the API is open.
+    """
+    expected = os.environ.get("CIVINLP_API_KEY")
+    if expected and not (x_api_key and hmac.compare_digest(x_api_key, expected)):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+def check_batch(items: Optional[list], name: str = "batch"):
+    if items is not None and len(items) > MAX_BATCH:
+        raise HTTPException(
+            status_code=413, detail=f"{name} has {len(items)} items; max is {MAX_BATCH}"
+        )
+
 
 app = FastAPI(
     title="CiviNLP Triage API",
     description="Road & Bridge maintenance prioritization API",
     version="0.1.0",
+    dependencies=[Depends(require_api_key)],
 )
 
 # ─── Request / Response Schemas ───────────────────────────────────────────────
@@ -88,6 +112,7 @@ def predict_roads(requests: List[RoadPredictionRequest]):
     Batch prediction for road complaints.
     Uses TF-IDF model if available, falls back to rule baseline.
     """
+    check_batch(requests)
     _load_models()
 
     texts = [r.text for r in requests]
@@ -129,6 +154,7 @@ def predict_bridges(requests: List[BridgePredictionRequest]):
     """
     Batch prediction for bridge severity.
     """
+    check_batch(requests)
     from civinlp.ranking.bridge_priority import BridgePriorityScorer
     scorer = BridgePriorityScorer()
 
@@ -150,6 +176,9 @@ def rank_assets(request: RankingRequest):
     Rank road areas and/or bridges by priority.
     """
     import pandas as pd
+
+    check_batch(request.road_predictions, "road_predictions")
+    check_batch(request.bridge_predictions, "bridge_predictions")
 
     result = RankingResponse()
 
