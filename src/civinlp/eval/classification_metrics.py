@@ -5,16 +5,16 @@ Provides macro-F1, per-class F1, confusion matrix, critical recall,
 and Expected Calibration Error (ECE) for model evaluation.
 """
 
+import logging
+from typing import Any, Dict, List, Optional
+
 import numpy as np
-import pandas as pd
-from typing import Dict, Any, List, Optional
 from sklearn.metrics import (
-    f1_score,
     classification_report,
     confusion_matrix,
+    f1_score,
     recall_score,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def compute_classification_report(
     Args:
         y_true: Ground truth labels.
         y_pred: Predicted labels.
-        critical_class: Label for the critical class (for critical recall). 
+        critical_class: Label for the critical class (for critical recall).
                         Set to None to skip.
 
     Returns:
@@ -70,7 +70,9 @@ def compute_classification_report(
     else:
         result["critical_recall"] = None
 
-    logger.info(f"Classification: macro_f1={macro_f1:.4f}, critical_recall={result['critical_recall']}")
+    logger.info(
+        f"Classification: macro_f1={macro_f1:.4f}, critical_recall={result['critical_recall']}"
+    )
     return result
 
 
@@ -102,7 +104,9 @@ def compute_ece(
     n = len(labels)
 
     for i in range(n_bins):
-        in_bin = (confidences > bin_boundaries[i]) & (confidences <= bin_boundaries[i + 1])
+        in_bin = (confidences > bin_boundaries[i]) & (
+            confidences <= bin_boundaries[i + 1]
+        )
         bin_size = in_bin.sum()
 
         if bin_size > 0:

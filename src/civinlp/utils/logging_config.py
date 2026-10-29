@@ -7,8 +7,8 @@ Import and call setup_logging() at the entry point of any script.
 
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 
 def setup_logging(
@@ -52,10 +52,16 @@ def setup_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Avoid duplicate handlers on repeated calls
-    if not root_logger.handlers:
-        root_logger.addHandler(console_handler)
-        root_logger.addHandler(file_handler)
+    # Replace handlers from an earlier setup_logging call; leave others (e.g.
+    # pytest's) alone. Only add a console handler if none writes to a stream yet.
+    for handler in list(root_logger.handlers):
+        if getattr(handler, "_civinlp", False):
+            root_logger.removeHandler(handler)
+            handler.close()
+    has_console = any(type(h) is logging.StreamHandler for h in root_logger.handlers)
+    for handler in ([file_handler] if has_console else [console_handler, file_handler]):
+        handler._civinlp = True
+        root_logger.addHandler(handler)
 
     logging.getLogger(__name__).info(f"Logging initialized. Log file: {log_file}")
     return root_logger

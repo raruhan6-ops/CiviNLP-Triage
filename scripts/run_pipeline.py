@@ -4,10 +4,9 @@ CiviNLP Triage — End-to-end pipeline runner.
 Executes: data download → preprocessing → training → evaluation.
 """
 
+import argparse
 import os
 import subprocess
-import sys
-import argparse
 from pathlib import Path
 
 
@@ -20,10 +19,18 @@ def run_step(command, description=""):
 
 def main():
     parser = argparse.ArgumentParser(description="Run the CiviNLP pipeline")
-    parser.add_argument("--skip-download", action="store_true", help="Skip data download")
-    parser.add_argument("--skip-training", action="store_true", help="Skip model training")
-    parser.add_argument("--transformer", action="store_true", help="Also train transformer model")
-    parser.add_argument("--limit", type=int, default=1000, help="Limit rows for download")
+    parser.add_argument(
+        "--skip-download", action="store_true", help="Skip data download"
+    )
+    parser.add_argument(
+        "--skip-training", action="store_true", help="Skip model training"
+    )
+    parser.add_argument(
+        "--transformer", action="store_true", help="Also train transformer model"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=1000, help="Limit rows for download"
+    )
     args = parser.parse_args()
 
     root = Path(__file__).parent.parent
@@ -73,8 +80,8 @@ def main():
     print("=" * 60)
     print(f"\nResults saved to: {root / 'results'}")
     print(f"Models saved to:  {root / 'models'}")
-    print(f"\nTo launch the dashboard:")
-    print(f"  streamlit run src/civinlp/ui/streamlit_app.py")
+    print("\nTo launch the dashboard:")
+    print("  streamlit run src/civinlp/ui/streamlit_app.py")
 
 
 if __name__ == "__main__":

@@ -50,7 +50,8 @@ CiviNLP Triage includes three model tiers for road defect classification, plus a
 
 ### Metrics (Illustrative)
 - Macro F1: ~1.0 on weak labels (expected, since TF-IDF learns the rule patterns).
-- Real-world F1 would require human-annotated test data.
+- Real-world F1 requires human-annotated test data (`scripts/evaluate_all.py --gold labels.csv`).
+- Ranking is evaluated against future complaint volume per area, not weak labels (`civinlp/eval/outcome_eval.py`).
 
 ---
 
@@ -104,5 +105,5 @@ CiviNLP Triage includes three model tiers for road defect classification, plus a
 > **⚠️ Decision-Support Only**: This tool supports maintenance triage and **does not replace engineering judgment**. All prioritized lists should be reviewed by qualified engineers before field action.
 
 - Predictions are based on text analysis and structural ratings, not physical inspection.
-- Model confidence should be used to flag uncertain cases for manual review.
+- Model confidence should be used to flag uncertain cases for manual review. The dashboard flags predictions below a configurable threshold, and `evaluate_all.py` reports coverage vs. accuracy for each threshold (`results/routing_*.csv`).
 - See [ETHICS_AND_LIMITATIONS.md](ETHICS_AND_LIMITATIONS.md) for full details.

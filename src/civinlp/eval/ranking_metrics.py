@@ -5,10 +5,11 @@ Provides Top-K Recall, NDCG@K, and Spearman rank correlation
 for evaluating prioritization quality.
 """
 
-import numpy as np
-from typing import List, Optional
-from scipy import stats
 import logging
+from typing import List, Optional
+
+import numpy as np
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ def top_k_recall(
     captured = top_k & critical_ids
     recall = len(captured) / len(critical_ids)
 
-    logger.debug(f"Top-{k} recall: {recall:.4f} ({len(captured)}/{len(critical_ids)} critical)")
+    logger.debug(
+        f"Top-{k} recall: {recall:.4f} ({len(captured)}/{len(critical_ids)} critical)"
+    )
     return float(recall)
 
 

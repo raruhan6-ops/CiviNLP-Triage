@@ -5,9 +5,10 @@ Supports time-based and area-based splitting strategies for
 both road and bridge datasets. Ensures no data leakage between splits.
 """
 
-import pandas as pd
 import logging
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,8 @@ def area_based_split(
         area_column: Name of the area column.
         test_areas: Explicit list of area_ids to hold out for test.
         test_frac: Approximate fraction of data to reserve for test if test_areas not given.
-        val_frac: Fraction of remaining (non-test) data to use for validation.
+        val_frac: Fraction of ALL rows to use for validation, drawn from the
+            non-test areas (capped so at least one training row remains).
         seed: Random seed for area selection.
 
     Returns:
@@ -96,6 +98,7 @@ def area_based_split(
     if test_areas is None:
         # Randomly select areas until we hit ~test_frac of total rows
         import numpy as np
+
         rng = np.random.RandomState(seed)
         shuffled_areas = rng.permutation(all_areas)
 
@@ -116,8 +119,9 @@ def area_based_split(
     remaining = df[~test_mask].copy()
 
     # Split remaining into train/val
-    val_size = int(len(remaining) * val_frac / (1.0 - test_frac + 1e-9))
-    val_size = min(val_size, len(remaining) - 1)
+    # Based on total rows so it stays correct when test_areas is given explicitly
+    val_size = int(round(len(df) * val_frac))
+    val_size = max(0, min(val_size, len(remaining) - 1))
 
     val_df = remaining.sample(n=val_size, random_state=seed)
     train_df = remaining.drop(val_df.index)
@@ -127,3 +131,54 @@ def area_based_split(
         f"test={len(test_df)} (test_areas={test_areas})"
     )
     return train_df, val_df, test_df
+
+
+def group_split(
+    df: pd.DataFrame,
+    group_column: str,
+    test_frac: float = 0.2,
+    val_frac: float = 0.1,
+    seed: int = 42,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Split by whole groups: `test_frac` / `val_frac` are fractions of GROUPS,
+    so every row of a group lands in exactly one split.
+
+    Use for bridges (group_column="bridge_id", so repeated inspections of one
+    bridge never leak across splits) or for zones (group_column="area_id").
+    """
+    if group_column not in df.columns:
+        raise ValueError(f"Column '{group_column}' not found in DataFrame")
+    if test_frac + val_frac >= 1.0:
+        raise ValueError("test_frac + val_frac must be < 1.0")
+
+    import numpy as np
+
+    rng = np.random.RandomState(seed)
+    groups = rng.permutation(sorted(df[group_column].astype(str).unique()))
+    n_test = int(round(len(groups) * test_frac))
+    n_val = int(round(len(groups) * val_frac))
+    if len(groups) - n_test - n_val < 1:
+        raise ValueError(f"Too few groups ({len(groups)}) for the requested split")
+
+    test_groups = set(groups[:n_test])
+    val_groups = set(groups[n_test : n_test + n_val])
+    keys = df[group_column].astype(str)
+    test_df = df[keys.isin(test_groups)].copy()
+    val_df = df[keys.isin(val_groups)].copy()
+    train_df = df[~keys.isin(test_groups | val_groups)].copy()
+
+    logger.info(
+        f"Group split on '{group_column}': train={len(train_df)}, val={len(val_df)}, "
+        f"test={len(test_df)} ({n_test} test / {n_val} val groups)"
+    )
+    return train_df, val_df, test_df
+
+
+def bridge_split(
+    df: pd.DataFrame, test_frac: float = 0.2, val_frac: float = 0.1, seed: int = 42
+):
+    """Split bridge records by bridge_id (see configs/bridges.yaml)."""
+    return group_split(
+        df, "bridge_id", test_frac=test_frac, val_frac=val_frac, seed=seed
+    )
