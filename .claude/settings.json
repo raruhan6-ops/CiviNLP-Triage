@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import pandas;print\\(pandas.__version__\\)\")",
+      "Bash(python -m pytest -q)",
+      "Bash(awk '{print $2}')",
+      "Bash(python -)",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
