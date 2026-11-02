@@ -78,9 +78,9 @@ OUTCOMES = {
 }
 
 # NYC 311 resolution_description is templated (~150 variants). These phrases
-# mark an inspection verdict (every template was reviewed by hand; see
-# paper/verdict_templates_review.csv); everything else (duplicates, pending inspections,
-# other jurisdictions, "see notes") has no verdict and is left out.
+# mark an inspection verdict (every template was reviewed by hand; the result
+# is docs/verdict_mapping.csv); everything else (duplicates, pending
+# inspections, other jurisdictions, "see notes") has no verdict and is left out.
 CONFIRMED_PHRASES = [
     "repaired the problem",
     "completed the request or corrected the condition",
