@@ -14,6 +14,7 @@ those areas; areas with no future complaints get relevance 0.
 """
 
 import logging
+import re
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -65,7 +66,40 @@ OUTCOMES = {
         "as open until the end of the data; areas with too few future complaints "
         "excluded)"
     ),
+    "confirmed_share": (
+        "share of future complaints where DOT confirmed a defect (repaired, "
+        "ordered a repair or correction) among those with an inspection verdict; "
+        "areas with too few verdicts excluded"
+    ),
 }
+
+# NYC 311 resolution_description is templated (~150 variants). These phrases
+# mark an inspection verdict; everything else (duplicates, pending inspections,
+# other jurisdictions, "see notes") has no verdict and is left out.
+CONFIRMED_PHRASES = [
+    "repaired the problem",
+    "completed the request or corrected the condition",
+    "issued a corrective action repair",
+    "issued a summons",
+    "notice to the responsible party to correct",
+    "temporary repairs were made",
+    "maintenance unit for repair",
+    "entered into the maintenance system",
+    "opened a repair order",
+    "requires general maintenance",
+    "requires a reconstruction project",
+    "requested the department of environmental protection address",
+]
+NOT_CONFIRMED_PHRASES = [
+    "did not find the reported problem",
+    "could not find the problem",
+    "condition was not found",
+    "meets its standards",
+    "meets dot standards",
+    "in compliance with",
+]
+_CONFIRMED_RE = re.compile("|".join(map(re.escape, CONFIRMED_PHRASES)))
+_NOT_CONFIRMED_RE = re.compile("|".join(map(re.escape, NOT_CONFIRMED_PHRASES)))
 
 
 def resolution_days(
@@ -86,6 +120,17 @@ def resolution_days(
     return ((closed - created).dt.total_seconds() / 86400).clip(lower=0)
 
 
+def resolution_verdict(descriptions: pd.Series) -> pd.Series:
+    """1.0 if DOT confirmed a defect, 0.0 if it found none, NaN if no verdict."""
+    text = descriptions.fillna("").astype(str).str.lower()
+    confirmed = text.str.contains(_CONFIRMED_RE)
+    rejected = text.str.contains(_NOT_CONFIRMED_RE)
+    verdict = pd.Series(np.nan, index=descriptions.index)
+    verdict[rejected & ~confirmed] = 0.0
+    verdict[confirmed & ~rejected] = 1.0
+    return verdict
+
+
 def future_outcomes(
     history: pd.DataFrame,
     future: pd.DataFrame,
@@ -100,7 +145,9 @@ def future_outcomes(
     Args:
         outcome: "volume" (number of future complaints) or "resolution_days"
             (median days to close them; areas with fewer than `min_future`
-            future complaints are left out, since their median is noise).
+            future complaints are left out, since their median is noise), or
+            "confirmed_share" (share of future complaints with a confirmed
+            defect, over areas with at least `min_future` verdicts).
 
     Returns:
         relevance: area -> outcome value. Used directly as NDCG relevance with
@@ -119,6 +166,19 @@ def future_outcomes(
 
     if outcome == "volume":
         counts = {a: float(future_counts.get(a, 0)) for a in areas}
+    elif outcome == "confirmed_share":
+        if "resolution_description" not in future.columns:
+            raise ValueError(
+                "confirmed_share outcome needs a 'resolution_description' column"
+            )
+        verdict = resolution_verdict(future["resolution_description"])
+        by_area = verdict.groupby(future_areas).agg(["mean", "count"])
+        counts = {
+            a: float(by_area.at[a, "mean"])
+            for a in areas
+            if a in by_area.index and by_area.at[a, "count"] >= min_future
+        }
+        areas = list(counts)
     else:
         if "closed_date" not in future.columns:
             raise ValueError("resolution_days outcome needs a 'closed_date' column")

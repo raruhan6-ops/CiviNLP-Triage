@@ -146,3 +146,32 @@ def test_area_split_holds_out_zones(tmp_path):
     ]
     assert [len(z) for z in zones] == [7, 1, 2]
     assert not (zones[0] & zones[2] or zones[1] & zones[2] or zones[0] & zones[1])
+
+
+def test_confirmed_share_outcome():
+    from civinlp.eval.outcome_eval import resolution_verdict
+
+    repaired = "The Department of Transportation inspected this complaint and repaired the problem."
+    not_found = "The Department of Transportation inspected this complaint and did not find the reported problem."
+    duplicate = "The Department of Transportation determined that this complaint is a duplicate."
+    verdict = resolution_verdict(pd.Series([repaired, not_found, duplicate, None]))
+    assert verdict.tolist()[:2] == [1.0, 0.0]
+    assert verdict[2:].isna().all()
+
+    history = pd.DataFrame({"area_id": ["A", "B", "C"]})
+    future = pd.DataFrame(
+        {
+            "area_id": ["A"] * 4 + ["B"] * 4 + ["C"] * 2,
+            # A: 3/3 confirmed (+1 duplicate), B: 1/4, C: too few verdicts
+            "resolution_description": [repaired] * 3
+            + [duplicate]
+            + [repaired]
+            + [not_found] * 3
+            + [repaired] * 2,
+        }
+    )
+    counts, critical = future_outcomes(
+        history, future, outcome="confirmed_share", min_future=3, critical_frac=0.5
+    )
+    assert counts == {"A": 1.0, "B": 0.25}
+    assert critical == {"A"}

@@ -28,6 +28,8 @@ SELECT_COLUMNS = [
     "borough",
     "latitude",
     "longitude",
+    # Templated agency outcome text; used as an evaluation outcome, never as input
+    "resolution_description",
 ]
 
 

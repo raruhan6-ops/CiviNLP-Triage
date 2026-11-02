@@ -42,7 +42,11 @@ def main():
         default=0.3,
         help="Share of the earliest folds used to tune weights and fit rankers",
     )
-    parser.add_argument("--outcomes", nargs="+", default=["volume", "resolution_days"])
+    parser.add_argument(
+        "--outcomes",
+        nargs="+",
+        default=["volume", "resolution_days", "confirmed_share"],
+    )
     parser.add_argument("--k", type=int, nargs="+", default=[10, 50])
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -64,8 +68,12 @@ def main():
 
     report = {"data": args.data, "rows": len(df), "unit": unit, "outcomes": {}}
     for outcome in args.outcomes:
-        if outcome == "resolution_days" and "closed_date" not in df.columns:
-            print("No closed_date column; skipping resolution_days.")
+        needs = {
+            "resolution_days": "closed_date",
+            "confirmed_share": "resolution_description",
+        }.get(outcome)
+        if needs and needs not in df.columns:
+            print(f"No {needs} column; skipping {outcome}.")
             continue
         per_fold, summary, info = run_rolling_evaluation(
             df,
