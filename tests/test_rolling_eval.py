@@ -77,6 +77,22 @@ def test_shrunk_severity_discounts_single_complaints():
     assert feats.loc["small", "severity_shrunk"] < feats.loc["big", "severity_shrunk"]
 
 
+def test_descriptor_shares():
+    df = pd.DataFrame(
+        {
+            "area_id": ["A", "A", "A", "B"],
+            "created_at": pd.to_datetime(["2024-01-01"] * 4),
+            "complaint_type": ["Street Condition"] * 3 + ["Curb Condition"],
+            "descriptor": ["Pothole", "Pothole", "Cave-in", "Broken Curb"],
+        }
+    )
+    vocab = ["curb condition|broken curb", "street condition|pothole"]
+    feats = area_features(df, pd.Timestamp("2024-01-02"), descriptors=vocab)
+    assert feats.loc["A", "share_desc_1"] == pytest.approx(2 / 3)
+    assert feats.loc["A", "share_desc_0"] == 0.0
+    assert feats.loc["B", "share_desc_0"] == 1.0
+
+
 def test_bootstrap_ci_and_paired_summary():
     lo, hi = bootstrap_ci(np.array([1.0, 2.0, 3.0, 4.0]))
     assert lo <= 2.5 <= hi

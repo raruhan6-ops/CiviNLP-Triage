@@ -19,12 +19,15 @@ complaint volume? Compare `learned_volume` (volume features only) with
 largely fixed by complaint type, and complaint types differ in how long the
 agency takes to close them, so `learned_volume_type` vs
 `learned_volume_type_severity` checks whether severity adds anything once the
-complaint-type mix is known.
+complaint-type mix is known. Rule severity is a fixed function of complaint
+type and descriptor, so `learned_volume_descriptor` vs
+`learned_volume_descriptor_severity` asks whether the severity mapping adds
+anything beyond the raw descriptor mix.
 """
 
 import logging
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -53,6 +56,19 @@ VOLUME_FEATURES = [
 ]
 SEVERITY_FEATURES = ["share_high", "share_medium", "log_n_high"]
 TYPE_FEATURES = [f"share_type_{i}" for i in range(len(ROAD_COMPLAINT_TYPES))]
+DESCRIPTOR_PREFIX = "share_desc_"
+
+
+def descriptor_keys(df: pd.DataFrame) -> pd.Series:
+    """'complaint type|descriptor' per row, lowercased."""
+    ctype = df.get("complaint_type", pd.Series("", index=df.index))
+    desc = df.get("descriptor", pd.Series("", index=df.index))
+    return (
+        ctype.astype(str).str.strip().str.lower()
+        + "|"
+        + desc.astype(str).str.strip().str.lower()
+    )
+
 
 DEFAULT_WEIGHT_GRID = [
     {"alpha": 1.0, "beta": b, "gamma": g}
@@ -121,6 +137,7 @@ def area_features(
     area_column: str = "area_id",
     time_column: str = "created_at",
     shrinkage: float = 10.0,
+    descriptors: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Per-area features from the history window only, indexed by area id.
@@ -129,7 +146,8 @@ def area_features(
     `priority_from_features` reproduces its score without the per-area loop.
     `severity_shrunk` pulls each area's mean severity toward the window mean by
     `shrinkage` pseudo-complaints, so an area with one high complaint no longer
-    tops the severity ranking.
+    tops the severity ranking. With `descriptors` (a vocabulary of
+    `descriptor_keys`), adds the share of each as `share_desc_<i>`.
     """
     df = history[~history[area_column].astype(str).isin(EXCLUDED_AREAS)].copy()
     df["_area"] = df[area_column].astype(str)
@@ -155,6 +173,12 @@ def area_features(
     )
     for i, name in enumerate(ROAD_COMPLAINT_TYPES):
         df[f"_type_{i}"] = (types == name.lower()).astype(float)
+
+    descriptors = descriptors or []
+    if descriptors:
+        keys = descriptor_keys(df)
+        for i, key in enumerate(descriptors):
+            df[f"_desc_{i}"] = (keys == key).astype(float)
 
     g = df.groupby("_area")
     feats = pd.DataFrame(
@@ -182,6 +206,8 @@ def area_features(
     feats["log_n_high"] = np.log1p(feats["n_high"])
     for i in range(len(ROAD_COMPLAINT_TYPES)):
         feats[f"share_type_{i}"] = g[f"_type_{i}"].mean()
+    for i in range(len(descriptors)):
+        feats[f"{DESCRIPTOR_PREFIX}{i}"] = g[f"_desc_{i}"].mean()
     feats["severity_norm"] = (feats["mean_severity"] - 1.0) / 2.0
 
     prior = df["_sev"].mean() if len(df) else 1.0
@@ -206,35 +232,28 @@ def priority_from_features(
     return score.clip(lower=0.0)
 
 
-def _order(values: pd.Series) -> List[str]:
-    """Highest value first; ties broken by area id so results are deterministic."""
-    frame = values.rename("v").reset_index()
-    key = frame.columns[0]
-    frame[key] = frame[key].astype(str)
-    return frame.sort_values(["v", key], ascending=[False, True])[key].tolist()
-
-
 def fold_rankings(
     feats: pd.DataFrame,
     tuned_weights: Optional[Dict[str, float]] = None,
     models: Optional[Dict[str, object]] = None,
     seed: int = 42,
-) -> Dict[str, List[str]]:
-    """All rankings for one fold, built from history features only."""
+) -> Dict[str, Union[List[str], pd.Series]]:
+    """
+    All rankings for one fold, built from history features only. Rankings are
+    score Series so Spearman can treat tied scores as ties; random is a list.
+    """
     rankings = {
-        "count_only": _order(feats["count"]),
-        "recency": _order(-feats["days_since_last"]),
-        "severity_only": _order(feats["mean_severity"]),
-        "severity_shrunk": _order(feats["severity_shrunk"]),
-        "priority": _order(priority_from_features(feats)),
+        "count_only": feats["count"],
+        "recency": -feats["days_since_last"],
+        "severity_only": feats["mean_severity"],
+        "severity_shrunk": feats["severity_shrunk"],
+        "priority": priority_from_features(feats),
     }
     if tuned_weights is not None:
-        rankings["priority_tuned"] = _order(
-            priority_from_features(feats, **tuned_weights)
-        )
+        rankings["priority_tuned"] = priority_from_features(feats, **tuned_weights)
     for name, (model, columns) in (models or {}).items():
-        rankings[name] = _order(
-            pd.Series(model.predict(feats[columns].to_numpy()), index=feats.index)
+        rankings[name] = pd.Series(
+            model.predict(feats[columns].to_numpy()), index=feats.index
         )
     rng = np.random.RandomState(seed)
     rankings["random"] = list(rng.permutation(sorted(feats.index.astype(str))))
@@ -248,6 +267,7 @@ def _prepare_folds(
     time_column: str,
     outcome: str,
     critical_frac: float,
+    descriptors: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Features and outcomes for each fold; folds with no rankable areas are dropped."""
     times = pd.to_datetime(df[time_column], errors="coerce")
@@ -260,7 +280,9 @@ def _prepare_folds(
         )
         if not counts:
             continue
-        feats = area_features(history, cutoff, area_column, time_column)
+        feats = area_features(
+            history, cutoff, area_column, time_column, descriptors=descriptors
+        )
         prepared.append(
             {
                 "cutoff": cutoff,
@@ -287,7 +309,7 @@ def tune_weights(
     for weights in grid:
         scores = []
         for fold in tuning:
-            ranked = _order(priority_from_features(fold["feats"], **weights))
+            ranked = priority_from_features(fold["feats"], **weights)
             result = evaluate_rankings(
                 {"p": ranked}, fold["counts"], fold["critical"], k_values
             )
@@ -313,17 +335,27 @@ def fit_learned_rankers(
         frames.append(feats.join(target.rename("_y"), how="inner"))
     data = pd.concat(frames)
     all_features = VOLUME_FEATURES + SEVERITY_FEATURES + TYPE_FEATURES
-    finite = np.isfinite(data[all_features]).all(axis=1)
+    desc_features = [c for c in data.columns if c.startswith(DESCRIPTOR_PREFIX)]
+    finite = np.isfinite(data[all_features + desc_features]).all(axis=1)
     data = data[finite]
     y = np.log1p(data["_y"].clip(lower=0).to_numpy())
 
-    models = {}
-    for name, columns in [
+    specs = [
         ("learned_volume", VOLUME_FEATURES),
         ("learned_volume_severity", VOLUME_FEATURES + SEVERITY_FEATURES),
         ("learned_volume_type", VOLUME_FEATURES + TYPE_FEATURES),
         ("learned_volume_type_severity", all_features),
-    ]:
+    ]
+    if desc_features:
+        specs += [
+            ("learned_volume_descriptor", VOLUME_FEATURES + desc_features),
+            (
+                "learned_volume_descriptor_severity",
+                VOLUME_FEATURES + desc_features + SEVERITY_FEATURES,
+            ),
+        ]
+    models = {}
+    for name, columns in specs:
         model = make_pipeline(StandardScaler(), Ridge(alpha=ridge_alpha))
         model.fit(data[columns].to_numpy(), y)
         models[name] = (model, columns)
@@ -407,8 +439,14 @@ def run_rolling_evaluation(
     k_values = k_values or [10, 50]
     tune_metric = tune_metric or f"ndcg@{k_values[0]}"
     folds = rolling_origins(df[time_column], history_days, horizon_days, step_days)
+    descriptors = None
+    if "descriptor" in df.columns and folds:
+        # Vocabulary from the tuning period only, so test folds add no new columns
+        tuning_end = folds[min(len(folds), math.ceil(len(folds) * tune_frac)) - 1][2]
+        times = pd.to_datetime(df[time_column], errors="coerce")
+        descriptors = sorted(descriptor_keys(df[times < tuning_end]).unique())
     prepared = _prepare_folds(
-        df, folds, area_column, time_column, outcome, critical_frac
+        df, folds, area_column, time_column, outcome, critical_frac, descriptors
     )
     if len(prepared) < 3:
         raise ValueError(
@@ -452,6 +490,7 @@ def run_rolling_evaluation(
         "tuning_folds": [str(f["cutoff"]) for f in tuning],
         "test_folds": [str(f["cutoff"]) for f in testing],
         "mean_rankable_areas": float(np.mean([len(f["counts"]) for f in testing])),
+        "descriptor_vocabulary": len(descriptors or []),
         "tuned_weights": tuned,
         "tune_metric": tune_metric,
         "weight_grid": grid_table.to_dict(orient="records"),
