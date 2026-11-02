@@ -123,6 +123,26 @@ def spearman_correlation(
     return float(corr)
 
 
+def spearman_from_scores(scores: dict, truth: dict) -> float:
+    """
+    Spearman correlation between ranking scores and outcome values over shared items.
+
+    Tied values get their average rank on both sides. Prefer this to
+    `spearman_correlation` whenever scores are available: converting tied scores
+    to list positions orders ties arbitrarily (e.g. by id), and if the outcome's
+    ties are ordered the same way the correlation is inflated.
+    """
+    shared = sorted(set(scores) & set(truth))
+    if len(shared) < 2:
+        return 0.0
+    a = [scores[i] for i in shared]
+    b = [truth[i] for i in shared]
+    if len(set(a)) < 2 or len(set(b)) < 2:
+        return 0.0  # undefined for a constant input
+    corr, _ = stats.spearmanr(a, b)
+    return float(corr)
+
+
 def top_k_recall_curve(
     ranked_ids: List[str],
     critical_ids: set,

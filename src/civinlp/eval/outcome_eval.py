@@ -15,12 +15,16 @@ those areas; areas with no future complaints get relevance 0.
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from civinlp.eval.ranking_metrics import ndcg_at_k, spearman_correlation, top_k_recall
+from civinlp.eval.ranking_metrics import (
+    ndcg_at_k,
+    spearman_from_scores,
+    top_k_recall,
+)
 from civinlp.ranking.road_priority import RoadPriorityScorer
 
 logger = logging.getLogger(__name__)
@@ -240,26 +244,49 @@ def baseline_rankings(
     return rankings
 
 
+def order_by_score(scores: pd.Series) -> List[str]:
+    """Highest score first; ties broken by area id so results are deterministic."""
+    frame = scores.rename("v").reset_index()
+    key = frame.columns[0]
+    frame[key] = frame[key].astype(str)
+    return frame.sort_values(["v", key], ascending=[False, True])[key].tolist()
+
+
 def evaluate_rankings(
-    rankings: Dict[str, List[str]],
+    rankings: Dict[str, Union[List[str], pd.Series]],
     counts: Dict[str, float],
     critical: set,
     k_values: Optional[List[int]] = None,
 ) -> pd.DataFrame:
-    """Score each ranking against the future-window ground truth."""
+    """
+    Score each ranking against the future-window ground truth.
+
+    A ranking is an ordered list of area ids, or a Series of scores indexed by
+    area id (higher = higher priority). Spearman is computed on raw scores and
+    raw outcome values with average ranks for ties; a list is scored by its
+    positions. Pass scores where ties are common (e.g. small grid cells), since
+    turning tied scores into positions orders them arbitrarily.
+    """
     if k_values is None:
         k_values = [5, 10, 20]
     k_values = [k for k in k_values if k <= len(counts)] or [len(counts)]
 
-    truth_order = sorted(counts, key=lambda a: (-counts[a], a))
     rows = []
-    for name, ranked in rankings.items():
+    for name, ranking in rankings.items():
+        if isinstance(ranking, pd.Series):
+            ranking = ranking.copy()
+            ranking.index = ranking.index.astype(str)
+            ranked = order_by_score(ranking)
+            scores = ranking.to_dict()
+        else:
+            ranked = list(ranking)
+            scores = {a: -i for i, a in enumerate(ranked)}
         ranked = [a for a in ranked if a in counts]
         row = {"ranking": name, "n_areas": len(ranked)}
         for k in k_values:
             row[f"recall@{k}"] = top_k_recall(ranked, critical, k)
             row[f"ndcg@{k}"] = ndcg_at_k(ranked, counts, k)
-        row["spearman_vs_future"] = spearman_correlation(ranked, truth_order)
+        row["spearman_vs_future"] = spearman_from_scores(scores, counts)
         rows.append(row)
     return pd.DataFrame(rows)
 

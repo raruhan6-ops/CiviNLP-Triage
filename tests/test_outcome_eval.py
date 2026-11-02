@@ -175,3 +175,18 @@ def test_confirmed_share_outcome():
     )
     assert counts == {"A": 1.0, "B": 0.25}
     assert critical == {"A"}
+
+
+def test_spearman_treats_tied_scores_as_ties():
+    # Three areas tie on score; their outcomes happen to follow id order.
+    # Ordering ties by id would make this ranking look perfect.
+    counts = {"A": 3.0, "B": 2.0, "C": 1.0, "D": 0.0}
+    scores = pd.Series({"A": 1.0, "B": 1.0, "C": 1.0, "D": 0.0})
+    tied = evaluate_rankings({"s": scores}, counts, {"A"}, k_values=[2])
+    as_list = evaluate_rankings(
+        {"s": ["A", "B", "C", "D"]}, counts, {"A"}, k_values=[2]
+    )
+    assert as_list["spearman_vs_future"].iloc[0] == pytest.approx(1.0)
+    assert tied["spearman_vs_future"].iloc[0] == pytest.approx(0.7746, abs=1e-3)
+    # Order-based metrics are unchanged by passing scores
+    assert tied["ndcg@2"].iloc[0] == pytest.approx(as_list["ndcg@2"].iloc[0])
