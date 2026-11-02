@@ -135,3 +135,19 @@ def test_run_rolling_evaluation_end_to_end():
     ndcg = summary[summary["metric"] == "ndcg@5"].set_index("ranking")["mean"]
     assert ndcg["count_only"] > ndcg["random"]
     assert ndcg["learned_volume"] > ndcg["random"]
+
+
+def test_ridge_penalty_is_chosen_per_model_on_tuning_folds():
+    df = _synthetic()
+    _, _, info = run_rolling_evaluation(
+        df, history_days=28, horizon_days=14, step_days=14, k_values=[5]
+    )
+    from civinlp.eval.rolling_eval import RIDGE_ALPHAS
+
+    assert set(info["ridge_alphas"]) == {
+        "learned_volume",
+        "learned_volume_severity",
+        "learned_volume_type",
+        "learned_volume_type_severity",
+    }
+    assert all(a in RIDGE_ALPHAS for a in info["ridge_alphas"].values())

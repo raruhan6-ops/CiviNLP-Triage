@@ -41,6 +41,7 @@ from civinlp.eval.outcome_eval import (
     evaluate_rankings,
     future_outcomes,
 )
+from civinlp.eval.ranking_metrics import spearman_from_scores
 from civinlp.ranking.road_priority import RoadPriorityScorer
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ VOLUME_FEATURES = [
 SEVERITY_FEATURES = ["share_high", "share_medium", "log_n_high"]
 TYPE_FEATURES = [f"share_type_{i}" for i in range(len(ROAD_COMPLAINT_TYPES))]
 DESCRIPTOR_PREFIX = "share_desc_"
+RIDGE_ALPHAS = [0.1, 1.0, 10.0, 100.0, 1e3, 1e4, 1e5]
 
 
 def descriptor_keys(df: pd.DataFrame) -> pd.Series:
@@ -320,19 +322,58 @@ def tune_weights(
     return {k: float(v) for k, v in best.items()}, table
 
 
+def _ridge(alpha: float):
+    return make_pipeline(StandardScaler(), Ridge(alpha=alpha))
+
+
+def _choose_alpha(data: pd.DataFrame, columns: List[str], y: np.ndarray, alphas):
+    """
+    Leave-one-tuning-fold-out choice of the ridge penalty: fit on the other
+    tuning folds and score Spearman against the held-out fold's raw outcome.
+    Ties go to the stronger penalty.
+    """
+    folds = data["_fold"].to_numpy()
+    if len(np.unique(folds)) < 2:
+        return alphas[0], {}
+    X = data[columns].to_numpy()
+    scores = {}
+    for alpha in alphas:
+        per_fold = []
+        for f in np.unique(folds):
+            train, test = folds != f, folds == f
+            pred = _ridge(alpha).fit(X[train], y[train]).predict(X[test])
+            idx = data.index[test]
+            per_fold.append(
+                spearman_from_scores(
+                    dict(zip(idx, pred)), dict(zip(idx, data["_y"].to_numpy()[test]))
+                )
+            )
+        scores[alpha] = float(np.mean(per_fold))
+    best = max(alphas, key=lambda a: (round(scores[a], 6), a))
+    return best, scores
+
+
 def fit_learned_rankers(
-    tuning: List[Dict], ridge_alpha: float = 1.0
-) -> Dict[str, Tuple[object, List[str]]]:
+    tuning: List[Dict], alphas: Optional[List[float]] = None
+) -> Tuple[Dict[str, Tuple[object, List[str]]], Dict[str, float]]:
     """
     Fit ridge regressions of log1p(outcome) on history features, pooled over
     tuning folds. Only the order of predictions matters, so a log target keeps
-    a few very busy areas from dominating the fit.
+    a few very busy areas from dominating the fit. Each model gets its own
+    penalty from `alphas`, chosen on the tuning folds (`_choose_alpha`), so a
+    model with ~100 descriptor features is not held to the penalty that suits
+    a 5-feature one.
+
+    Returns the fitted models and the penalty chosen for each.
     """
+    alphas = alphas or RIDGE_ALPHAS
     frames = []
-    for fold in tuning:
+    for i, fold in enumerate(tuning):
         feats = fold["feats"]
         target = pd.Series(fold["counts"], dtype=float)
-        frames.append(feats.join(target.rename("_y"), how="inner"))
+        frame = feats.join(target.rename("_y"), how="inner")
+        frame.index = [f"{i}:{a}" for a in frame.index]
+        frames.append(frame.assign(_fold=i))
     data = pd.concat(frames)
     all_features = VOLUME_FEATURES + SEVERITY_FEATURES + TYPE_FEATURES
     desc_features = [c for c in data.columns if c.startswith(DESCRIPTOR_PREFIX)]
@@ -354,12 +395,12 @@ def fit_learned_rankers(
                 VOLUME_FEATURES + desc_features + SEVERITY_FEATURES,
             ),
         ]
-    models = {}
+    models, chosen = {}, {}
     for name, columns in specs:
-        model = make_pipeline(StandardScaler(), Ridge(alpha=ridge_alpha))
-        model.fit(data[columns].to_numpy(), y)
-        models[name] = (model, columns)
-    return models
+        alpha, _ = _choose_alpha(data, columns, y, alphas)
+        models[name] = (_ridge(alpha).fit(data[columns].to_numpy(), y), columns)
+        chosen[name] = alpha
+    return models, chosen
 
 
 def bootstrap_ci(
@@ -463,7 +504,7 @@ def run_rolling_evaluation(
         raise ValueError("Fewer than 2 test folds after tuning; lower tune_frac")
 
     tuned, grid_table = tune_weights(tuning, weight_grid, tune_metric, k_values)
-    models = fit_learned_rankers(tuning)
+    models, ridge_alphas = fit_learned_rankers(tuning)
     logger.info(
         f"Rolling eval ({outcome}): {len(tuning)} tuning folds, "
         f"{len(testing)} test folds; tuned weights {tuned}"
@@ -492,6 +533,7 @@ def run_rolling_evaluation(
         "mean_rankable_areas": float(np.mean([len(f["counts"]) for f in testing])),
         "descriptor_vocabulary": len(descriptors or []),
         "tuned_weights": tuned,
+        "ridge_alphas": ridge_alphas,
         "tune_metric": tune_metric,
         "weight_grid": grid_table.to_dict(orient="records"),
     }
