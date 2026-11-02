@@ -78,7 +78,8 @@ OUTCOMES = {
 }
 
 # NYC 311 resolution_description is templated (~150 variants). These phrases
-# mark an inspection verdict; everything else (duplicates, pending inspections,
+# mark an inspection verdict (every template was reviewed by hand; see
+# paper/verdict_templates_review.csv); everything else (duplicates, pending inspections,
 # other jurisdictions, "see notes") has no verdict and is left out.
 CONFIRMED_PHRASES = [
     "repaired the problem",
@@ -93,6 +94,16 @@ CONFIRMED_PHRASES = [
     "requires general maintenance",
     "requires a reconstruction project",
     "requested the department of environmental protection address",
+    "asked the department of environmental protection to address",
+    "meets resurfacing standards",  # the street qualifies for resurfacing
+    "issued a violation to the property owner",
+    "found a sidewalk violation",
+    "sidewalk violaiton exists",  # sic, as in the source text
+    "scheduled the location for repair",
+    "will schedule the repair",
+    "work to correct this condition has been scheduled",
+    "sidewalk was repaired by the city",
+    "requires action, and will be corrected",
 ]
 NOT_CONFIRMED_PHRASES = [
     "did not find the reported problem",
@@ -101,6 +112,9 @@ NOT_CONFIRMED_PHRASES = [
     "meets its standards",
     "meets dot standards",
     "in compliance with",
+    "could not find the reported condition",
+    "could not find the condition you reported",
+    "did not see a violation",
 ]
 _CONFIRMED_RE = re.compile("|".join(map(re.escape, CONFIRMED_PHRASES)))
 _NOT_CONFIRMED_RE = re.compile("|".join(map(re.escape, NOT_CONFIRMED_PHRASES)))

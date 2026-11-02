@@ -190,3 +190,26 @@ def test_spearman_treats_tied_scores_as_ties():
     assert tied["spearman_vs_future"].iloc[0] == pytest.approx(0.7746, abs=1e-3)
     # Order-based metrics are unchanged by passing scores
     assert tied["ndcg@2"].iloc[0] == pytest.approx(as_list["ndcg@2"].iloc[0])
+
+
+def test_resolution_verdict_reviewed_templates():
+    from civinlp.eval.outcome_eval import resolution_verdict
+
+    texts = pd.Series(
+        [
+            "The Department of Transportation inspected the condition and made the "
+            "determination that the street meets resurfacing standards and will be "
+            "planned for either the next or future resurfacing seasons (2 - 3 years).",
+            "Upon inspection, the Department of Transportation could not find the "
+            "reported condition, therefore no action was taken.",
+            "The Department of Transportation's inspectors could not find the address "
+            "you reported.",
+            "The Department of Transportation (DOT) inspected but did not see a "
+            "violation of their rules.",
+        ]
+    )
+    verdict = resolution_verdict(texts)
+    assert verdict[0] == 1.0  # qualifies for resurfacing: need confirmed
+    assert verdict[1] == 0.0
+    assert pd.isna(verdict[2])  # wrong address is not an inspection verdict
+    assert verdict[3] == 0.0
