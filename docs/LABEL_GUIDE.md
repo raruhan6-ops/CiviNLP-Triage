@@ -58,6 +58,26 @@ Since manually labeled training data is not available, CiviNLP Triage uses **wea
 
 ---
 
+## Gold Label File Format
+
+Hand labels are passed to `scripts/evaluate_all.py --gold labels.csv`. The CSV needs:
+
+| Column | Required | Values |
+|:---|:---|:---|
+| `record_id` | yes | The 311 record ID, matching `record_id` in the processed data |
+| `defect` | one of `defect` / `severity` | A defect enum value from the taxonomy above |
+| `severity` | one of `defect` / `severity` | `high`, `medium`, `low` or `unknown` |
+
+```csv
+record_id,defect,severity
+66123456,pothole,medium
+66123789,signage,low
+```
+
+Values are compared in lowercase. Rows whose `record_id` is in the TF-IDF training split are dropped before scoring, so label rows from the validation or test period.
+
+---
+
 ## Notes for Annotators
 
 If manual labels are added in the future:
