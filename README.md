@@ -1,64 +1,38 @@
-# 🏗️ CiviNLP Triage
-### Road & Bridge Maintenance Prioritization from Public Records
+# CiviNLP Triage
+
+**Out-of-time evaluation of 311 road-maintenance triage, with a reproducible ranking pipeline, dashboard and API.**
 
 [![CI](https://github.com/raruhan6-ops/CiviNLP-Triage/actions/workflows/ci.yaml/badge.svg)](https://github.com/raruhan6-ops/CiviNLP-Triage/actions/workflows/ci.yaml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**CiviNLP Triage** is a reproducible decision-support tool that turns public maintenance records into a ranked list of where to look first. It classifies NYC 311 road complaints by defect type and severity, scores bridges from National Bridge Inventory (NBI) condition ratings, and combines these into priority rankings. The rankings are evaluated against what actually happened afterwards, not against the rules that produced them.
+CiviNLP Triage ranks areas of a city by where road maintenance is likely needed, from public 311 complaint records. It labels each complaint with a defect type and a rule-based severity, aggregates complaints by zip code, neighbourhood or 500 m grid cell, and ranks areas by volume, severity and complaint mix.
 
----
+The project's main contribution is how those rankings are evaluated. Triage models are often scored against labels produced by the same keyword rules that feed them, which is circular: here every classifier reaches a Macro F1 of 1.0 against such labels. Instead, CiviNLP Triage grades each ranking only on outcomes the rules never see, observed *after* a time cutoff:
 
-## 🚀 Key Features
+| Outcome | Source |
+|:---|:---|
+| Future complaint volume | 311 complaints in the next window |
+| Resolution time | Median days to close those complaints |
+| Confirmed-defect share | DOT resolution text, mapped to verdicts by a reviewed template table |
+| Pavement condition and its change | Street pavement ratings from city inspectors, independent of 311 |
 
-### 🧠 Classification
-- **Three model tiers**: keyword rules, TF-IDF + Logistic Regression, and a DistilBERT classifier.
-- **Defect type**: pothole, cracking, street condition, obstruction, signage, other.
-- **Severity**: high / medium / low from whole-word keyword rules (e.g. *cave-in*, *dangerous* → high; *cracked*, *broken* → medium).
-- **Input**: the 311 `complaint_type` and `descriptor` fields. The public NYC 311 data has no free-text narrative, so models work on these short structured descriptions.
+Rankings are compared over rolling folds with moving-block bootstrap intervals, adjusted for multiple comparisons.
 
-### 🛡️ Data Handling
-- **Road-only ingestion**: downloads only road-related complaint types (street, highway, curb and sidewalk conditions; street signs), in pages with retries and timeouts.
-- **Clean area IDs**: ZIP codes normalised to 5 digits.
-- **Bridge preprocessing**: maps NBI items (`DECK_COND_058`, ...) to internal fields, handles `N`/missing ratings, converts coordinates.
-- **PII redaction**: emails, phone numbers and street addresses are redacted before saving (names are not detected).
-- **Leakage-aware splits**: chronological, held-out zones, or by bridge ID.
+## Findings
 
-### 📊 Prioritization
-- **Road priority score**: `α·count + β·severity + γ·repeat_rate − δ·uncertainty`, with every term scaled to [0, 1] so the weights are comparable.
-- **Bridge priority score**: worst condition rating plus log-scaled traffic.
-- **Manual-review routing**: predictions below a confidence threshold are flagged for a human reviewer.
-- **Calibration**: temperature scaling with Expected Calibration Error (ECE) before and after.
+On 298,193 NYC 311 road complaints (November 2024 to November 2026, 17 test folds), with a replication on 155,148 San Francisco requests (2016 to 2025, six annual test folds):
 
-### 🖥️ Dashboard & API
-- **Streamlit dashboard**: road predictions with confidence and review flags, area rankings, a bridge ranking view, and CSV export.
-- **FastAPI service**: batch prediction and ranking endpoints, an optional API key, and a batch-size cap.
+- **Complaint volume is hard to beat.** Counting past complaints is the best simple ranker of future volume (Spearman 0.876 by NYC zip code, 0.929 by San Francisco neighbourhood), and severity adds nothing to it.
+- **Rule-based severity adds little beyond complaint type.** For resolution time, type adds +0.112 (zip) and +0.105 (grid) on top of severity, while severity adds +0.034 (an interval including zero) and +0.006 on top of type.
+- **Against measured pavement condition**, complaint type carries what signal there is. Severity adds nothing by zip code or neighbourhood and slightly lowers a type-aware ranking by grid cell, in both cities. No ranker predicts how ratings change.
+- **The descriptor mix**, which severity compresses, ranks confirmed defects best by grid cell.
 
----
+Severity here is a fixed relabelling of two categorical fields (complaint type and descriptor), so these results test rule-based severity, not language understanding. The accompanying paper gives the full design, results and limitations.
 
-## 🛠️ System Architecture
+## Installation
 
-```mermaid
-graph LR
-    A[NYC 311 API] --> B(Ingest & clean roads)
-    N[NBI CSV] --> M(Clean bridges)
-    B --> C{Classifiers}
-    C -->|Rules / TF-IDF / DistilBERT| D[Defect, severity, confidence]
-    D --> E[Road priority scorer]
-    D --> R[Review routing]
-    M --> S[Bridge priority scorer]
-    E --> F[Dashboard, API, reports]
-    S --> F
-    B --> G[Evaluation: future outcomes, baselines, calibration]
-```
-
----
-
-## 💻 Installation
-
-Requires Python 3.11+.
+Requires Python 3.11 or later.
 
 ```bash
 git clone https://github.com/raruhan6-ops/CiviNLP-Triage.git
@@ -68,26 +42,56 @@ source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e .[dev]
 ```
 
----
+## Reproducing the paper
 
-## ⚡ Quick Start
+The datasets are public and are downloaded by the pipeline; they are not redistributed. The main steps:
 
-### 1. Run the full pipeline
-Download, preprocess, train the TF-IDF models and evaluate:
 ```bash
-python scripts/run_pipeline.py --limit 20000
+# NYC 311 road complaints (two years) and DOT pavement ratings
+python -m civinlp.data.download_roads_311 --monthly --since 2024-11-01 --until 2026-11-02 \
+    --output data_raw/roads_311_2y_res.parquet
+python -m civinlp.data.preprocess_roads --input data_raw/roads_311_2y_res.parquet \
+    --output data_processed/roads_processed_2y_res.parquet
+python -m civinlp.data.pavement
+
+# Rolling out-of-time evaluation, by zip code and by 500 m grid cell
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area zip --output_dir results/rolling/
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area grid --cell_m 500 --output_dir results/rolling/
+python scripts/simultaneous_intervals.py --output_dir results/rolling/
+
+# San Francisco replication
+python -m civinlp.data.sf
 ```
-The default `--limit` is 1,000 rows. Use around 20,000 so the evaluation's history and future windows each span a few weeks. Add `--transformer` to also fine-tune DistilBERT (slow without a GPU).
 
-### 2. Launch the dashboard
-```bash
-streamlit run src/civinlp/ui/streamlit_app.py
+[docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) lists every command, including the pavement, zip-code and San Francisco runs, the verdict checks and which output file backs each table.
+
+## The tool
+
+### Pipeline
+
+```mermaid
+graph LR
+    A[NYC 311 / SF311] --> B(Ingest and clean)
+    P[Pavement ratings] --> E
+    B --> C{Classifiers}
+    C -->|Rules / TF-IDF / DistilBERT| D[Defect, severity, confidence]
+    D --> R[Area rankers]
+    R --> E[Out-of-time evaluation]
+    R --> F[Dashboard and API]
+    N[NBI bridges] --> S(Bridge scorer) --> F
 ```
-Choose **Asset → Roads** or **Bridges** in the sidebar. The "Manual review below confidence" slider sets the review threshold.
 
-### 3. Launch the API
+- **Classification:** keyword rules, TF-IDF with logistic regression, and an optional DistilBERT classifier, for defect type (pothole, cracking, street condition, obstruction, signage, other) and severity (high, medium, low). The models are trained on rule-generated labels, so their scores against those labels measure agreement with the rules only.
+- **Ranking:** count, recency and severity baselines; a weighted priority score; and ridge rankers on volume, severity, complaint-type and descriptor features, with the penalty chosen on tuning folds.
+- **Review routing:** predictions below a confidence threshold are flagged for manual review.
+- **Bridges:** a separate scorer ranks bridges from National Bridge Inventory condition ratings and traffic. It is not part of the evaluation.
+
+### Dashboard and API
+
 ```bash
-uvicorn civinlp.api.main:app --reload
+python scripts/run_pipeline.py --limit 20000         # download a recent sample, train, evaluate
+streamlit run src/civinlp/ui/streamlit_app.py        # dashboard
+uvicorn civinlp.api.main:app --reload                # API
 ```
 
 | Endpoint | Purpose |
@@ -99,138 +103,60 @@ uvicorn civinlp.api.main:app --reload
 
 The API is open by default for local use. Set `CIVINLP_API_KEY` to require an `X-API-Key` header, and `CIVINLP_MAX_BATCH` to change the per-request limit (default 1,000).
 
-### 4. Bridges
-Download a state's delimited NBI file from [FHWA](https://www.fhwa.dot.gov/bridge/nbi.cfm), then:
-```bash
-python -m civinlp.data.download_nbi path/to/nbi.csv --output data_raw/bridges_nbi.parquet
-python -m civinlp.data.preprocess_bridges
-```
-Alternatively, upload the NBI CSV directly in the dashboard's Bridges view.
-
----
-
-## 📈 Evaluation & Results
-
-```bash
-python scripts/evaluate_all.py                    # chronological split
-python scripts/evaluate_all.py --split area       # hold out 20% of zones
-python scripts/evaluate_all.py --gold labels.csv  # also score against hand labels
-```
-
-Results are written to `results/`; see [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) for the full list.
-
-### Classification
-
-The training labels come from the keyword rules, so F1 against them only measures **agreement with the rules**:
-
-| Model | Task | Macro F1 (vs. weak labels) |
-| :--- | :--- | :--- |
-| Rule Baseline | Defect | 1.00 (by construction) |
-| TF-IDF + LR | Defect | ~1.00 |
-| TF-IDF + LR | Severity | ~1.00 |
-| DistilBERT | Defect | *not yet trained on current data* |
-
-Real accuracy, calibration and the review-routing trade-off need hand labels. Pass a CSV with `record_id` plus `defect` and/or `severity` columns via `--gold`.
-
-### Ranking
-
-Rankings are scored against outcomes the rules never see. Areas are ranked using complaints **before** a time cutoff, then graded on what happened **after** it:
-
-- **Volume**: how many new road complaints each area received.
-- **Resolution time**: median days to close those complaints (still-open ones count as open until the end of the data; areas with fewer than 3 future complaints are left out).
-
-Example run (20,000 road complaints, Sep 10 to Oct 28, 2026, 193 ZIP areas, cutoff at the time midpoint):
-
-| Ranking | Volume: NDCG@10 | Volume: Spearman | Resolution: NDCG@10 | Resolution: Spearman |
-| :--- | :--- | :--- | :--- | :--- |
-| Count only (H1) | 0.87 | **0.89** | 0.58 | 0.16 |
-| Recency (H2) | 0.49 | 0.45 | 0.28 | 0.05 |
-| Severity only (H3) | 0.04 | 0.17 | 0.61 | 0.21 |
-| **Priority score** (α=1, β=1) | 0.76 | 0.79 | 0.51 | **0.25** |
-| Random | 0.36 | 0.14 | 0.39 | -0.05 |
-
-The two outcomes pull in opposite directions:
-
-- **Volume**: past volume is the best predictor of future volume, and more severity weight lowers that score (Spearman 0.89 at β=0, 0.45 at β=4).
-- **Resolution time**: severity carries the signal, and the combined priority score correlates best.
-
-β=1 is a deliberate middle ground, not a value tuned to either metric. The full weight sweeps are in `results/ranking_sensitivity*.csv`. Resolution time also reflects complaint-type mix (curb repairs take far longer than street repairs), so treat it as a second proxy, not ground truth.
-
-### Manual review
-
-`results/routing_*.csv` reports, for each confidence threshold:
-- the share of predictions handled automatically,
-- the accuracy of that automated share,
-- the share of model errors sent to review.
-
-Against weak labels the model makes almost no errors, so this curve becomes informative only with `--gold` hand labels.
-
----
-
-## 📂 Project Structure
+## Project structure
 
 ```
-configs/            Road and bridge settings (weights, model parameters)
-docs/               Data dictionary, label guide, model card, ethics, reproducibility
-scripts/            run_pipeline.py, train_models.py, evaluate_all.py
 src/civinlp/
-  data/             311 download, NBI loading, preprocessing, splits, schemas
-  labels/           Taxonomy and keyword rules
-  models/           Rules, TF-IDF, DistilBERT, calibration
-  ranking/          Road and bridge priority scorers
-  eval/             Classification, ranking, outcome and routing evaluation
-  api/  ui/         FastAPI service and Streamlit dashboard
-  utils/            I/O, text cleaning, PII redaction, logging, seeds
-tests/              pytest suite
+  data/      Downloads and preprocessing: NYC 311, DOT pavement ratings (pavement.py),
+             San Francisco 311 and pavement (sf.py), NBI bridges, splits, schemas
+  labels/    Defect taxonomy and keyword rules
+  models/    Rules, TF-IDF, DistilBERT, calibration
+  ranking/   Road and bridge priority scorers
+  eval/      Rolling out-of-time evaluation, outcomes, bootstrap intervals,
+             classification, ranking and routing metrics
+  api/  ui/  FastAPI service and Streamlit dashboard
+  utils/     I/O, text cleaning, PII redaction, logging, seeds
+scripts/     Pipeline, training, rolling evaluation, simultaneous intervals,
+             verdict sensitivity and agreement
+docs/        Reproducibility guide, data dictionary, label guide, verdict table
+paper/       Paper and verdict-review sheets
+tests/       pytest suite
 ```
 
----
+## Data
 
-## 📂 Data
+| Dataset | Publisher | Use |
+|:---|:---|:---|
+| [311 Service Requests](https://data.cityofnewyork.us/d/erm2-nwe9) | NYC Open Data | Road complaints and DOT resolution text |
+| [Street Pavement Ratings](https://data.cityofnewyork.us/d/6yyb-pb25) | NYC DOT | Pavement outcome |
+| [311 Cases](https://data.sfgov.org/d/vw6y-z8j6) | DataSF | San Francisco road defect requests |
+| [Historical Pavement Condition Index](https://data.sfgov.org/d/78va-8dhi) | San Francisco Public Works | San Francisco pavement outcome |
+| [National Bridge Inventory](https://www.fhwa.dot.gov/bridge/nbi.cfm) | FHWA | Bridge scorer (downloaded manually) |
 
-### Sources
-- **NYC 311 Service Requests**: [NYC Open Data](https://data.cityofnewyork.us/resource/erm2-nwe9), downloaded by the pipeline. The API returns the most recent requests, so results depend on the download date.
-- **National Bridge Inventory**: [FHWA](https://www.fhwa.dot.gov/bridge/nbi.cfm), downloaded manually.
+Downloaded and processed files (`data_raw/`, `data_processed/`), model weights (`models/`) and results (`results/`) are gitignored. Open-data records change over time, so a later download can differ from ours. Emails, phone numbers and street addresses are redacted before text is saved; personal names are not detected, which is adequate only for the structured fields used here.
 
-### What is stored
-- **Raw and processed Parquet files** (`data_raw/`, `data_processed/`, gitignored). Only the needed 311 columns are downloaded: IDs, dates, status, complaint type, descriptor, ZIP code, borough and coordinates.
-- **Model files** (`models/`, gitignored).
-- **Evaluation outputs** (`results/`, gitignored).
+## Documentation
 
-### What is not stored
-- Emails, phone numbers or street addresses in model text (redacted before saving).
-- The full NYC 311 dataset (only a recent sample; set the size with `--limit`).
-
----
-
-## 📖 Documentation
-
-| Document | Description |
+| Document | Contents |
 |:---|:---|
-| [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Fields, types and derivations |
-| [LABEL_GUIDE.md](docs/LABEL_GUIDE.md) | Defect taxonomy and severity definitions |
-| [MODEL_CARD.md](docs/MODEL_CARD.md) | Model details, metrics, caveats, biases |
-| [ETHICS_AND_LIMITATIONS.md](docs/ETHICS_AND_LIMITATIONS.md) | Fairness, reporting bias, responsible use |
-| [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | Exact commands, seeds, expected outputs |
+| [REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | Every command, seed and output file behind the paper |
+| [DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Raw, processed and derived fields for each dataset |
+| [LABEL_GUIDE.md](docs/LABEL_GUIDE.md) | Defect and severity definitions; DOT verdict definitions for raters |
+| [verdict_mapping.csv](docs/verdict_mapping.csv) | Template-to-verdict table behind the confirmed-defect outcome |
 
----
+## Limitations and responsible use
 
-## ⚠️ Limitations & Responsible Use
+This is a decision-support prototype. It does not replace engineering judgment or field inspection.
 
-> **This tool supports decisions; it does not replace engineering judgment or field inspection.**
+- **Reporting bias.** 311 volume reflects who reports as well as where defects are, so ranking by volume can direct attention to areas that report more. Rankings are not normalised for population or road length, and fairness across areas is not evaluated.
+- **Proxy outcomes.** Future volume, resolution time and confirmed share are proxies for need. Pavement ratings measure condition directly but only for the segments inspectors rate in each window.
+- **Verdict rules.** The confirmed-defect labels come from phrase rules on templated text, cover 64% of NYC complaints, and have been checked only by the co-author who reviewed them.
+- **Short input.** The public 311 fields contain no citizen narrative, only short categorical text.
+- **Two cities.** The San Francisco panel has six annual folds, and the NYC severity rules mark only collapsed sidewalks as high there.
 
-- **Weak labels**: models are trained on keyword-derived labels, not human annotations. Classification scores against them are not real-world accuracy.
-- **Short structured input**: the input is complaint type plus descriptor, not free-text narratives.
-- **Reporting bias**: 311 data reflects who reports problems, not the true condition of every street. Areas that report less can be under-prioritized.
-- **Proxy outcomes**: future complaint volume and resolution time are proxies for need, not ground truth.
-- **Bridges**: the bridge pipeline is tested on NBI-format sample rows; validate it on a full state file before relying on it.
-- See [ETHICS_AND_LIMITATIONS.md](docs/ETHICS_AND_LIMITATIONS.md) for details.
+## Running the checks
 
----
-
-## 🤝 Contributing
-
-Contributions are welcome. Before opening a pull request, run the same checks as CI:
+The same checks as CI:
 
 ```bash
 ruff check src/ scripts/ tests/
@@ -238,6 +164,12 @@ black --check src/ scripts/ tests/
 pytest tests/ -v --ignore=tests/test_advanced_models.py
 ```
 
-## 📄 License
+`tests/test_advanced_models.py` needs the transformer dependencies and a model download.
 
-This project is licensed under the [MIT License](LICENSE).
+## Citation
+
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff).
+
+## License
+
+[MIT](LICENSE)

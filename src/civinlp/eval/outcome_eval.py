@@ -14,12 +14,17 @@ those areas; areas with no future complaints get relevance 0.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+import re
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from civinlp.eval.ranking_metrics import ndcg_at_k, spearman_correlation, top_k_recall
+from civinlp.eval.ranking_metrics import (
+    ndcg_at_k,
+    spearman_from_scores,
+    top_k_recall,
+)
 from civinlp.ranking.road_priority import RoadPriorityScorer
 
 logger = logging.getLogger(__name__)
@@ -65,7 +70,79 @@ OUTCOMES = {
         "as open until the end of the data; areas with too few future complaints "
         "excluded)"
     ),
+    "confirmed_share": (
+        "share of future complaints where DOT confirmed a defect (repaired, "
+        "ordered a repair or correction) among those with an inspection verdict; "
+        "areas with too few verdicts excluded"
+    ),
+    "pavement_deficit": (
+        "mean of 10 minus the DOT pavement rating over street segments rated in "
+        "the future window (higher = worse road); areas with too few ratings "
+        "excluded"
+    ),
+    "pavement_poor_share": (
+        "share of street segments rated in the future window with a DOT pavement "
+        "rating below 7; areas with too few ratings excluded"
+    ),
 }
+PAVEMENT_CHANGE_OUTCOMES = {"pavement_decline", "pavement_change"}
+OUTCOMES["pavement_decline"] = (
+    "rating points lost per year since the segment's previous inspection, over "
+    "segments re-rated in the future window whose rating did not rise (a rise "
+    "means repair); areas with too few such segments excluded"
+)
+OUTCOMES["pavement_change"] = (
+    "rating points lost per year since the previous inspection over all "
+    "re-rated segments, repairs included (negative = improved)"
+)
+PAVEMENT_OUTCOMES = {
+    "pavement_deficit",
+    "pavement_poor_share",
+} | PAVEMENT_CHANGE_OUTCOMES
+POOR_RATING = 7.0  # DOT: 8-10 good, 4-7 fair (7 counts as good on local streets)
+MIN_REPEAT_DAYS = 180  # shorter gaps are re-inspections, not a change over time
+
+# NYC 311 resolution_description is templated (~150 variants). These phrases
+# mark an inspection verdict (every template was reviewed by hand; the result
+# is docs/verdict_mapping.csv); everything else (duplicates, pending
+# inspections, other jurisdictions, "see notes") has no verdict and is left out.
+CONFIRMED_PHRASES = [
+    "repaired the problem",
+    "completed the request or corrected the condition",
+    "issued a corrective action repair",
+    "issued a summons",
+    "notice to the responsible party to correct",
+    "temporary repairs were made",
+    "maintenance unit for repair",
+    "entered into the maintenance system",
+    "opened a repair order",
+    "requires general maintenance",
+    "requires a reconstruction project",
+    "requested the department of environmental protection address",
+    "asked the department of environmental protection to address",
+    "meets resurfacing standards",  # the street qualifies for resurfacing
+    "issued a violation to the property owner",
+    "found a sidewalk violation",
+    "sidewalk violaiton exists",  # sic, as in the source text
+    "scheduled the location for repair",
+    "will schedule the repair",
+    "work to correct this condition has been scheduled",
+    "sidewalk was repaired by the city",
+    "requires action, and will be corrected",
+]
+NOT_CONFIRMED_PHRASES = [
+    "did not find the reported problem",
+    "could not find the problem",
+    "condition was not found",
+    "meets its standards",
+    "meets dot standards",
+    "in compliance with",
+    "could not find the reported condition",
+    "could not find the condition you reported",
+    "did not see a violation",
+]
+_CONFIRMED_RE = re.compile("|".join(map(re.escape, CONFIRMED_PHRASES)))
+_NOT_CONFIRMED_RE = re.compile("|".join(map(re.escape, NOT_CONFIRMED_PHRASES)))
 
 
 def resolution_days(
@@ -86,6 +163,17 @@ def resolution_days(
     return ((closed - created).dt.total_seconds() / 86400).clip(lower=0)
 
 
+def resolution_verdict(descriptions: pd.Series) -> pd.Series:
+    """1.0 if DOT confirmed a defect, 0.0 if it found none, NaN if no verdict."""
+    text = descriptions.fillna("").astype(str).str.lower()
+    confirmed = text.str.contains(_CONFIRMED_RE)
+    rejected = text.str.contains(_NOT_CONFIRMED_RE)
+    verdict = pd.Series(np.nan, index=descriptions.index)
+    verdict[rejected & ~confirmed] = 0.0
+    verdict[confirmed & ~rejected] = 1.0
+    return verdict
+
+
 def future_outcomes(
     history: pd.DataFrame,
     future: pd.DataFrame,
@@ -100,7 +188,12 @@ def future_outcomes(
     Args:
         outcome: "volume" (number of future complaints) or "resolution_days"
             (median days to close them; areas with fewer than `min_future`
-            future complaints are left out, since their median is noise).
+            future complaints are left out, since their median is noise), or
+            "confirmed_share" (share of future complaints with a confirmed
+            defect, over areas with at least `min_future` verdicts), or
+            "pavement_deficit" / "pavement_poor_share" (from DOT pavement
+            ratings in `future`: mean 10 - rating, or the share rated below
+            POOR_RATING, over areas with at least `min_future` ratings).
 
     Returns:
         relevance: area -> outcome value. Used directly as NDCG relevance with
@@ -119,6 +212,43 @@ def future_outcomes(
 
     if outcome == "volume":
         counts = {a: float(future_counts.get(a, 0)) for a in areas}
+    elif outcome == "confirmed_share":
+        # A precomputed `verdict` column (1, 0 or NaN) overrides the phrase
+        # rules, so sensitivity runs can reassign individual templates.
+        if "verdict" in future.columns:
+            verdict = future["verdict"].astype(float)
+        elif "resolution_description" in future.columns:
+            verdict = resolution_verdict(future["resolution_description"])
+        else:
+            raise ValueError(
+                "confirmed_share outcome needs a 'resolution_description' "
+                "or 'verdict' column"
+            )
+        by_area = verdict.groupby(future_areas).agg(["mean", "count"])
+        counts = {
+            a: float(by_area.at[a, "mean"])
+            for a in areas
+            if a in by_area.index and by_area.at[a, "count"] >= min_future
+        }
+        areas = list(counts)
+    elif outcome in PAVEMENT_OUTCOMES:
+        # `future` here holds pavement ratings, not complaints
+        if "rating" not in future.columns:
+            raise ValueError(f"{outcome} outcome needs a 'rating' column")
+        rating = pd.to_numeric(future["rating"], errors="coerce")
+        if outcome == "pavement_deficit":
+            badness = 10.0 - rating
+        elif outcome == "pavement_poor_share":
+            badness = (rating < POOR_RATING).astype(float).where(rating.notna())
+        else:
+            badness = _rating_decline(future, rating, outcome)
+        by_area = badness.groupby(future_areas).agg(["mean", "count"])
+        counts = {
+            a: float(by_area.at[a, "mean"])
+            for a in areas
+            if a in by_area.index and by_area.at[a, "count"] >= min_future
+        }
+        areas = list(counts)
     else:
         if "closed_date" not in future.columns:
             raise ValueError("resolution_days outcome needs a 'closed_date' column")
@@ -134,6 +264,26 @@ def future_outcomes(
     ordered = sorted(counts, key=lambda a: (-counts[a], a))
     critical = {a for a in ordered[:n_critical] if counts[a] > 0}
     return counts, critical
+
+
+def _rating_decline(future: pd.DataFrame, rating: pd.Series, outcome: str) -> pd.Series:
+    """
+    Rating points lost per year since each segment's previous inspection;
+    NaN where there is no usable earlier rating. For "pavement_decline",
+    segments whose rating rose are dropped, since a rating only rises after
+    repair work.
+    """
+    if "prev_rating" not in future.columns or "prev_date" not in future.columns:
+        raise ValueError(f"{outcome} outcome needs prev_rating and prev_date")
+    prev = pd.to_numeric(future["prev_rating"], errors="coerce")
+    days = (
+        pd.to_datetime(future["created_at"]) - pd.to_datetime(future["prev_date"])
+    ).dt.total_seconds() / 86400
+    decline = (prev - rating) / (days / 365.25)
+    usable = prev.notna() & (days >= MIN_REPEAT_DAYS)
+    if outcome == "pavement_decline":
+        usable &= rating <= prev
+    return decline.where(usable)
 
 
 def baseline_rankings(
@@ -180,26 +330,49 @@ def baseline_rankings(
     return rankings
 
 
+def order_by_score(scores: pd.Series) -> List[str]:
+    """Highest score first; ties broken by area id so results are deterministic."""
+    frame = scores.rename("v").reset_index()
+    key = frame.columns[0]
+    frame[key] = frame[key].astype(str)
+    return frame.sort_values(["v", key], ascending=[False, True])[key].tolist()
+
+
 def evaluate_rankings(
-    rankings: Dict[str, List[str]],
+    rankings: Dict[str, Union[List[str], pd.Series]],
     counts: Dict[str, float],
     critical: set,
     k_values: Optional[List[int]] = None,
 ) -> pd.DataFrame:
-    """Score each ranking against the future-window ground truth."""
+    """
+    Score each ranking against the future-window ground truth.
+
+    A ranking is an ordered list of area ids, or a Series of scores indexed by
+    area id (higher = higher priority). Spearman is computed on raw scores and
+    raw outcome values with average ranks for ties; a list is scored by its
+    positions. Pass scores where ties are common (e.g. small grid cells), since
+    turning tied scores into positions orders them arbitrarily.
+    """
     if k_values is None:
         k_values = [5, 10, 20]
     k_values = [k for k in k_values if k <= len(counts)] or [len(counts)]
 
-    truth_order = sorted(counts, key=lambda a: (-counts[a], a))
     rows = []
-    for name, ranked in rankings.items():
+    for name, ranking in rankings.items():
+        if isinstance(ranking, pd.Series):
+            ranking = ranking.copy()
+            ranking.index = ranking.index.astype(str)
+            ranked = order_by_score(ranking)
+            scores = ranking.to_dict()
+        else:
+            ranked = list(ranking)
+            scores = {a: -i for i, a in enumerate(ranked)}
         ranked = [a for a in ranked if a in counts]
         row = {"ranking": name, "n_areas": len(ranked)}
         for k in k_values:
             row[f"recall@{k}"] = top_k_recall(ranked, critical, k)
             row[f"ndcg@{k}"] = ndcg_at_k(ranked, counts, k)
-        row["spearman_vs_future"] = spearman_correlation(ranked, truth_order)
+        row["spearman_vs_future"] = spearman_from_scores(scores, counts)
         rows.append(row)
     return pd.DataFrame(rows)
 

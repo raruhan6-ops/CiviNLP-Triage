@@ -136,3 +136,41 @@ def test_socrata_download_is_paged(tmp_path, monkeypatch):
     mod.download_roads_311(str(tmp_path / "r.parquet"), limit=20)
     assert calls == [(4, 0), (4, 4), (4, 8)]
     assert len(load_parquet(tmp_path / "r.parquet")) == 9
+
+
+def test_monthly_download_saves_and_resumes(tmp_path, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    import civinlp.data.download_roads_311 as mod
+
+    calls, dropped = [], []
+
+    def mock_read_csv(url, **kwargs):
+        where = parse_qs(urlsplit(url).query)["$where"][0]
+        calls.append(where)
+        month = where.split("created_date>='")[1][:7]
+        if month == "2024-02" and not dropped:
+            dropped.append(month)
+            raise OSError("connection dropped")
+        return pd.DataFrame(
+            {
+                "unique_key": [month],
+                "created_date": [f"{month}-15"],
+                "complaint_type": ["Street Condition"],
+            }
+        )
+
+    monkeypatch.setattr(mod, "fetch_csv", mock_read_csv)
+    monkeypatch.setattr(mod.time, "sleep", lambda s: None)
+    out = str(tmp_path / "r.parquet")
+
+    # Feb fails, Jan and Mar are saved
+    df = mod.download_roads_311_monthly(out, "2024-01-01", "2024-04-01", retries=1)
+    assert sorted(df["unique_key"]) == ["2024-01", "2024-03"]
+    assert "created_date<'2024-02-01T00:00:00'" in calls[0]
+
+    # Rerun only fetches the missing month
+    calls.clear()
+    df = mod.download_roads_311_monthly(out, "2024-01-01", "2024-04-01", retries=1)
+    assert len(calls) == 1 and "2024-02" in calls[0]
+    assert sorted(df["unique_key"]) == ["2024-01", "2024-02", "2024-03"]

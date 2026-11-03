@@ -146,3 +146,75 @@ def test_area_split_holds_out_zones(tmp_path):
     ]
     assert [len(z) for z in zones] == [7, 1, 2]
     assert not (zones[0] & zones[2] or zones[1] & zones[2] or zones[0] & zones[1])
+
+
+def test_confirmed_share_outcome():
+    from civinlp.eval.outcome_eval import resolution_verdict
+
+    repaired = "The Department of Transportation inspected this complaint and repaired the problem."
+    not_found = "The Department of Transportation inspected this complaint and did not find the reported problem."
+    duplicate = "The Department of Transportation determined that this complaint is a duplicate."
+    verdict = resolution_verdict(pd.Series([repaired, not_found, duplicate, None]))
+    assert verdict.tolist()[:2] == [1.0, 0.0]
+    assert verdict[2:].isna().all()
+
+    history = pd.DataFrame({"area_id": ["A", "B", "C"]})
+    future = pd.DataFrame(
+        {
+            "area_id": ["A"] * 4 + ["B"] * 4 + ["C"] * 2,
+            # A: 3/3 confirmed (+1 duplicate), B: 1/4, C: too few verdicts
+            "resolution_description": [repaired] * 3
+            + [duplicate]
+            + [repaired]
+            + [not_found] * 3
+            + [repaired] * 2,
+        }
+    )
+    counts, critical = future_outcomes(
+        history, future, outcome="confirmed_share", min_future=3, critical_frac=0.5
+    )
+    assert counts == {"A": 1.0, "B": 0.25}
+    assert critical == {"A"}
+
+    # A precomputed verdict column overrides the phrase rules
+    overridden = future.assign(verdict=[0.0] * 3 + [None] + [1.0] * 4 + [1.0] * 2)
+    counts, _ = future_outcomes(history, overridden, outcome="confirmed_share")
+    assert counts == {"A": 0.0, "B": 1.0}
+
+
+def test_spearman_treats_tied_scores_as_ties():
+    # Three areas tie on score; their outcomes happen to follow id order.
+    # Ordering ties by id would make this ranking look perfect.
+    counts = {"A": 3.0, "B": 2.0, "C": 1.0, "D": 0.0}
+    scores = pd.Series({"A": 1.0, "B": 1.0, "C": 1.0, "D": 0.0})
+    tied = evaluate_rankings({"s": scores}, counts, {"A"}, k_values=[2])
+    as_list = evaluate_rankings(
+        {"s": ["A", "B", "C", "D"]}, counts, {"A"}, k_values=[2]
+    )
+    assert as_list["spearman_vs_future"].iloc[0] == pytest.approx(1.0)
+    assert tied["spearman_vs_future"].iloc[0] == pytest.approx(0.7746, abs=1e-3)
+    # Order-based metrics are unchanged by passing scores
+    assert tied["ndcg@2"].iloc[0] == pytest.approx(as_list["ndcg@2"].iloc[0])
+
+
+def test_resolution_verdict_reviewed_templates():
+    from civinlp.eval.outcome_eval import resolution_verdict
+
+    texts = pd.Series(
+        [
+            "The Department of Transportation inspected the condition and made the "
+            "determination that the street meets resurfacing standards and will be "
+            "planned for either the next or future resurfacing seasons (2 - 3 years).",
+            "Upon inspection, the Department of Transportation could not find the "
+            "reported condition, therefore no action was taken.",
+            "The Department of Transportation's inspectors could not find the address "
+            "you reported.",
+            "The Department of Transportation (DOT) inspected but did not see a "
+            "violation of their rules.",
+        ]
+    )
+    verdict = resolution_verdict(texts)
+    assert verdict[0] == 1.0  # qualifies for resurfacing: need confirmed
+    assert verdict[1] == 0.0
+    assert pd.isna(verdict[2])  # wrong address is not an inspection verdict
+    assert verdict[3] == 0.0

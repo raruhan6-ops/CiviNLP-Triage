@@ -1,7 +1,7 @@
 [project]
 name = "civinlp-triage"
-version = "0.1.0"
-description = "A reproducible NLP decision-support tool for road and bridge maintenance prioritization."
+version = "1.0.0"
+description = "Out-of-time evaluation of 311 road-maintenance triage, with a reproducible ranking pipeline, dashboard and API."
 authors = [
     {name = "Rejuan Ahmed Ruhan", email = "ra.ruhan6@gmail.com"},
 ]
@@ -10,6 +10,7 @@ dependencies = [
     "tqdm>=4.65.0",
     "numpy>=1.24.0",
     "scikit-learn>=1.3.0",
+    "scipy>=1.10.0",
     "transformers>=4.30.0",
     "torch>=2.0.0",
     "fastapi>=0.100.0",
@@ -17,9 +18,6 @@ dependencies = [
     "streamlit>=1.46.0",  # width="stretch"
     "pydantic>=2.0.0",
     "pyarrow>=12.0.0",
-    "geopy>=2.3.0",
-    "shapely>=2.0.0",
-    "hydra-core>=1.3.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"

@@ -145,7 +145,9 @@ if data_source == "Use Sample Data":
             df = load_sample_data()
             st.session_state.pop("data_key", None)  # explicit refresh always reloads
             set_data(df, "sample")
-            st.success(f"✅ Loaded {len(df)} records from sample data.")
+            # Toast, not st.success: an element above the tabs that appears on only
+            # one rerun shifts their position and resets the selected tab.
+            st.toast(f"✅ Loaded {len(df)} records from sample data.")
         except Exception as e:
             st.error(f"Error loading data: {e}")
 
@@ -185,7 +187,7 @@ elif data_source == "Upload CSV":
                 else:
                     df["area_id"] = "UNKNOWN"
             set_data(df, upload_key)
-            st.success(f"✅ Uploaded {len(df)} records.")
+            st.toast(f"✅ Uploaded {len(df)} records.")
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
 
