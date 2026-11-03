@@ -451,14 +451,60 @@ def bootstrap_ci(
     k = len(values)
     if k < 2:
         return (float("nan"), float("nan"))
+    means = values[_block_indices(k, n_boot, block, seed)].mean(axis=1)
+    tail = (1 - level) / 2 * 100
+    return float(np.percentile(means, tail)), float(np.percentile(means, 100 - tail))
+
+
+def _block_indices(k: int, n_boot: int, block: int, seed: int) -> np.ndarray:
+    """(n_boot, k) fold indices, each row `k` folds drawn in runs of `block`."""
     block = max(1, min(block, k))
     n_blocks = int(math.ceil(k / block))
     rng = np.random.RandomState(seed)
     starts = rng.randint(0, k - block + 1, size=(n_boot, n_blocks))
-    idx = (starts[:, :, None] + np.arange(block)).reshape(n_boot, -1)[:, :k]
-    means = values[idx].mean(axis=1)
-    tail = (1 - level) / 2 * 100
-    return float(np.percentile(means, tail)), float(np.percentile(means, 100 - tail))
+    return (starts[:, :, None] + np.arange(block)).reshape(n_boot, -1)[:, :k]
+
+
+def simultaneous_intervals(
+    diffs: pd.DataFrame,
+    n_boot: int = N_BOOT,
+    level: float = 0.95,
+    seed: int = 42,
+    block: int = BLOCK_SIZE,
+) -> Tuple[pd.DataFrame, float]:
+    """
+    Simultaneous (sup-t) moving-block bootstrap intervals for a family of
+    paired differences measured on the same folds.
+
+    `diffs` has one row per fold, in time order, and one column per comparison.
+    Every bootstrap draw resamples the same blocks of folds for all columns, so
+    the correlation between comparisons is kept. Each interval is the mean
+    plus or minus `crit` bootstrap standard errors, where `crit` is the `level`
+    quantile of the largest standardised deviation across the family: all
+    intervals cover their true values together with probability about `level`.
+
+    Returns one row per comparison (mean, standard error, interval) and `crit`.
+    """
+    values = diffs.to_numpy(dtype=float)
+    if np.isnan(values).any():
+        raise ValueError("simultaneous_intervals needs every comparison on every fold")
+    k = len(values)
+    means = values[_block_indices(k, n_boot, block, seed)].mean(axis=1)
+    est = values.mean(axis=0)
+    se = means.std(axis=0, ddof=1)
+    # A comparison that never varies (identical rankers) has no spread to scale
+    scaled = np.divide(np.abs(means - est), se, out=np.zeros_like(means), where=se > 0)
+    crit = float(np.percentile(scaled.max(axis=1), level * 100))
+    table = pd.DataFrame(
+        {
+            "comparison": diffs.columns,
+            "diff": est,
+            "se": se,
+            "sim_low": est - crit * se,
+            "sim_high": est + crit * se,
+        }
+    )
+    return table, crit
 
 
 def paired_comparisons(

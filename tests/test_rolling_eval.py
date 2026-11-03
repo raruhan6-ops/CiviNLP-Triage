@@ -10,6 +10,7 @@ from civinlp.eval.rolling_eval import (
     priority_from_features,
     rolling_origins,
     run_rolling_evaluation,
+    simultaneous_intervals,
     summarize_folds,
 )
 from civinlp.ranking.road_priority import RoadPriorityScorer
@@ -135,6 +136,21 @@ def test_paired_comparisons():
     assert row["diff"] == pytest.approx(0.075)
     assert row["ci_low"] <= row["diff"] <= row["ci_high"]
     assert row["win_rate"] == pytest.approx(0.75)
+
+
+def test_simultaneous_intervals_are_wider_than_pointwise():
+    rng = np.random.RandomState(0)
+    diffs = pd.DataFrame(rng.normal(0.05, 0.05, size=(17, 12)))
+    diffs["constant"] = 0.0
+    table, crit = simultaneous_intervals(diffs)
+    assert crit > 1.96  # a family of 12 needs more than a single interval
+    for col in range(12):
+        lo, hi = bootstrap_ci(diffs[col].to_numpy())
+        row = table.iloc[col]
+        assert row["sim_low"] < lo and row["sim_high"] > hi
+    # A comparison that never varies has a zero-width interval at its value
+    const = table.set_index("comparison").loc["constant"]
+    assert const["sim_low"] == const["sim_high"] == 0.0
 
 
 def test_run_rolling_evaluation_end_to_end():

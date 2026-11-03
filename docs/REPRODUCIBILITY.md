@@ -136,6 +136,14 @@ python scripts/rolling_eval.py --from_folds --area zip --output_dir results/roll
 python scripts/rolling_eval.py --from_folds --area grid --cell_m 500 --output_dir results/rolling/
 ```
 
+The 42 paired comparisons (7 comparisons × 3 outcomes × 2 units) are also given simultaneous intervals, which hold for the whole family at once rather than one comparison at a time. They use the same moving-block bootstrap, resampling the same blocks of folds for every comparison:
+
+```bash
+python scripts/simultaneous_intervals.py --output_dir results/rolling/
+```
+
+This writes `rolling_comparisons_simultaneous.csv`, with the unadjusted and the simultaneous interval for each comparison side by side.
+
 The template-to-verdict table behind the confirmed-share outcome is `docs/verdict_mapping.csv`; the phrase rules that produce it are in `civinlp/eval/outcome_eval.py`.
 
 Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:
