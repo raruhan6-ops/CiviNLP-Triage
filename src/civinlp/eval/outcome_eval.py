@@ -85,8 +85,22 @@ OUTCOMES = {
         "rating below 7; areas with too few ratings excluded"
     ),
 }
-PAVEMENT_OUTCOMES = {"pavement_deficit", "pavement_poor_share"}
+PAVEMENT_CHANGE_OUTCOMES = {"pavement_decline", "pavement_change"}
+OUTCOMES["pavement_decline"] = (
+    "rating points lost per year since the segment's previous inspection, over "
+    "segments re-rated in the future window whose rating did not rise (a rise "
+    "means repair); areas with too few such segments excluded"
+)
+OUTCOMES["pavement_change"] = (
+    "rating points lost per year since the previous inspection over all "
+    "re-rated segments, repairs included (negative = improved)"
+)
+PAVEMENT_OUTCOMES = {
+    "pavement_deficit",
+    "pavement_poor_share",
+} | PAVEMENT_CHANGE_OUTCOMES
 POOR_RATING = 7.0  # DOT: 8-10 good, 4-7 fair (7 counts as good on local streets)
+MIN_REPEAT_DAYS = 180  # shorter gaps are re-inspections, not a change over time
 
 # NYC 311 resolution_description is templated (~150 variants). These phrases
 # mark an inspection verdict (every template was reviewed by hand; the result
@@ -224,8 +238,10 @@ def future_outcomes(
         rating = pd.to_numeric(future["rating"], errors="coerce")
         if outcome == "pavement_deficit":
             badness = 10.0 - rating
-        else:
+        elif outcome == "pavement_poor_share":
             badness = (rating < POOR_RATING).astype(float).where(rating.notna())
+        else:
+            badness = _rating_decline(future, rating, outcome)
         by_area = badness.groupby(future_areas).agg(["mean", "count"])
         counts = {
             a: float(by_area.at[a, "mean"])
@@ -248,6 +264,26 @@ def future_outcomes(
     ordered = sorted(counts, key=lambda a: (-counts[a], a))
     critical = {a for a in ordered[:n_critical] if counts[a] > 0}
     return counts, critical
+
+
+def _rating_decline(future: pd.DataFrame, rating: pd.Series, outcome: str) -> pd.Series:
+    """
+    Rating points lost per year since each segment's previous inspection;
+    NaN where there is no usable earlier rating. For "pavement_decline",
+    segments whose rating rose are dropped, since a rating only rises after
+    repair work.
+    """
+    if "prev_rating" not in future.columns or "prev_date" not in future.columns:
+        raise ValueError(f"{outcome} outcome needs prev_rating and prev_date")
+    prev = pd.to_numeric(future["prev_rating"], errors="coerce")
+    days = (
+        pd.to_datetime(future["created_at"]) - pd.to_datetime(future["prev_date"])
+    ).dt.total_seconds() / 86400
+    decline = (prev - rating) / (days / 365.25)
+    usable = prev.notna() & (days >= MIN_REPEAT_DAYS)
+    if outcome == "pavement_decline":
+        usable &= rating <= prev
+    return decline.where(usable)
 
 
 def baseline_rankings(

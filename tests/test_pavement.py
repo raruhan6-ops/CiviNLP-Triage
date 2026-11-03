@@ -2,7 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from civinlp.data.pavement import line_midpoint, preprocess_pavement
+from civinlp.data.pavement import (
+    add_previous_rating,
+    line_midpoint,
+    preprocess_pavement,
+)
 from civinlp.eval.outcome_eval import future_outcomes
 from civinlp.eval.rolling_eval import (
     grid_area_ids,
@@ -93,3 +97,45 @@ def test_rolling_evaluation_grades_on_ratings():
     assert info["bootstrap_block"] == 2
     rho = summary[summary["metric"] == "spearman_vs_future"].set_index("ranking")
     assert rho.loc["count_only", "mean"] > 0.5
+
+
+def test_previous_rating_skips_same_day_passes():
+    df = pd.DataFrame(
+        {
+            "segment_id": ["s"] * 4 + ["t"],
+            "created_at": pd.to_datetime(
+                ["2024-01-10", "2025-01-10", "2025-01-10", "2026-01-10", "2025-06-01"]
+            ),
+            "rating": [9.0, 7.0, 8.0, 6.0, 5.0],
+        }
+    )
+    out = add_previous_rating(df)
+    # Both passes on 2025-01-10 look back to 2024; 2026 looks back to their mean
+    assert np.isnan(out["prev_rating"].iloc[0])
+    assert out["prev_rating"].iloc[1:4].tolist() == [9.0, 9.0, 7.5]
+    assert np.isnan(out["prev_rating"].iloc[4])
+
+
+def test_rating_decline_outcomes():
+    history = pd.DataFrame({"area_id": ["A", "B"]})
+    year = pd.Timedelta(days=365.25)
+    now = pd.Timestamp("2026-06-01")
+    future = pd.DataFrame(
+        {
+            "area_id": ["A"] * 4 + ["B"] * 3,
+            "created_at": [now] * 7,
+            "rating": [7.0, 8.0, 6.0, 9.5, 8.0, 7.0, 9.0],
+            "prev_rating": [8.0, 8.0, 8.0, 6.0, 9.0, 9.0, None],
+            "prev_date": [now - year] * 3
+            + [now - year, now - year, now - 30 * year / 365.25, None],
+        }
+    )
+    decline, _ = future_outcomes(
+        history, future, outcome="pavement_decline", min_future=2
+    )
+    # A: the repaired segment (6 -> 9.5) is dropped; B: a 30-day gap is too short
+    assert decline == pytest.approx({"A": (1 + 0 + 2) / 3})
+    change, _ = future_outcomes(
+        history, future, outcome="pavement_change", min_future=2
+    )
+    assert change == pytest.approx({"A": (1 + 0 + 2 - 3.5) / 4})

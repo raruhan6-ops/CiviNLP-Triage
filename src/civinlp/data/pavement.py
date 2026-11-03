@@ -92,7 +92,7 @@ def preprocess_pavement(raw: pd.DataFrame) -> pd.DataFrame:
     Rows with a `nonratingreason` (duplicate, construction, multi-pass, ...)
     carry a rating of 0 and are dropped, as are rows without a date or
     geometry. Output columns: segment_id, created_at (inspection date),
-    rating, latitude, longitude, borough, road_type.
+    rating, latitude, longitude, borough, road_type, prev_rating, prev_date.
     """
     rating = pd.to_numeric(raw["systemrating"], errors="coerce")
     inspected = pd.to_datetime(raw["inspection"], errors="coerce")
@@ -112,7 +112,29 @@ def preprocess_pavement(raw: pd.DataFrame) -> pd.DataFrame:
     )
     out = out[out["latitude"].notna()].reset_index(drop=True)
     logger.info(f"Kept {len(out)} of {len(raw)} rows as located ratings")
-    return out
+    return add_previous_rating(out)
+
+
+def add_previous_rating(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add prev_rating and prev_date: the segment's rating on its last earlier
+    inspection date. Ratings of one segment on the same day (directions,
+    passes) are averaged first, so a same-day rating is never the "previous"
+    one.
+    """
+    day = pd.to_datetime(df["created_at"]).dt.normalize()
+    daily = (
+        df.assign(_day=day)
+        .groupby(["segment_id", "_day"], as_index=False)["rating"]
+        .mean()
+        .sort_values(["segment_id", "_day"])
+    )
+    grouped = daily.groupby("segment_id")
+    daily["prev_rating"] = grouped["rating"].shift()
+    daily["prev_date"] = grouped["_day"].shift()
+    prev = daily.drop(columns="rating")
+    out = df.assign(_day=day).merge(prev, on=["segment_id", "_day"], how="left")
+    return out.drop(columns="_day")
 
 
 if __name__ == "__main__":

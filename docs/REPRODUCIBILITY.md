@@ -154,6 +154,13 @@ python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parq
 python scripts/simultaneous_intervals.py --outcomes pavement_deficit pavement_poor_share --units grid500m --block 4 --tag _pavement
 ```
 
+Rating change, a check against standing differences between areas: `pavement_change` is rating points lost per year since each segment's previous inspection (gaps of 180 days or more), over all re-rated segments; `pavement_decline` drops segments whose rating rose (repair or rating noise). Outputs carry the `_pavement_change` tag.
+
+```bash
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area grid --ratings data_processed/pavement_ratings.parquet --outcomes pavement_change pavement_decline --horizon_days 91 --block 4 --tag _pavement_change --output_dir results/rolling/
+python scripts/simultaneous_intervals.py --outcomes pavement_change pavement_decline --units grid500m --block 4 --tag _pavement_change
+```
+
 `pavement_deficit` is the mean of 10 minus the rating over segments rated in the future window (higher is worse); `pavement_poor_share` is the share rated below 7. Outputs carry the `_pavement` tag: `rolling_info_grid500m_pavement.json`, `rolling_comparisons_grid500m_pavement.csv` and `rolling_comparisons_simultaneous_pavement.csv`.
 
 Agreement with a second, blind rater on the verdict table (see `docs/LABEL_GUIDE.md`):
