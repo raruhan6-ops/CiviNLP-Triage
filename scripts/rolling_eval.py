@@ -20,6 +20,7 @@ from civinlp.eval.rolling_eval import (
     BLOCK_SIZE,
     grid_area_ids,
     grid_reference_lat,
+    nearest_area_ids,
     paired_comparisons,
     run_rolling_evaluation,
     summarize_folds,
@@ -107,13 +108,21 @@ def main():
 
     ratings = None
     if PAVEMENT_OUTCOMES & set(args.outcomes):
-        if not args.ratings or args.area != "grid":
-            parser.error("pavement outcomes need --ratings and --area grid")
-        # Ratings have no zip code; place them on the complaints' grid
+        if not args.ratings:
+            parser.error("pavement outcomes need --ratings")
         ratings = pd.read_parquet(args.ratings)
-        ratings["area_id"] = grid_area_ids(
-            ratings, args.cell_m, ref_lat=grid_reference_lat(df)
-        )
+        if args.area == "grid":
+            # Place ratings on the complaints' grid
+            ratings["area_id"] = grid_area_ids(
+                ratings, args.cell_m, ref_lat=grid_reference_lat(df)
+            )
+        else:
+            # Ratings have no zip code; take the nearest complaint's
+            ratings["area_id"] = nearest_area_ids(ratings, df)
+            logger.info(
+                f"{(ratings['area_id'] == 'UNKNOWN').mean():.2%} of ratings "
+                "have no complaint within 300 m"
+            )
 
     report = {"data": args.data, "rows": len(df), "unit": unit, "outcomes": {}}
     comparisons = []

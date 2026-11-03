@@ -122,6 +122,45 @@ def grid_reference_lat(
     return float(lat[lat.notna() & lon.notna() & ~((lat == 0) & (lon == 0))].mean())
 
 
+def nearest_area_ids(
+    points: pd.DataFrame,
+    reference: pd.DataFrame,
+    area_column: str = "area_id",
+    max_m: float = 300.0,
+    lat_column: str = "latitude",
+    lon_column: str = "longitude",
+) -> pd.Series:
+    """
+    Give each row of `points` the area of the nearest located row of
+    `reference`, e.g. pavement ratings the zip code of the nearest complaint.
+
+    Points with no reference row within `max_m` metres, or with missing
+    coordinates, get "UNKNOWN".
+    """
+    from scipy.spatial import cKDTree
+
+    def located(df):
+        lat = pd.to_numeric(df[lat_column], errors="coerce")
+        lon = pd.to_numeric(df[lon_column], errors="coerce")
+        return lat, lon, lat.notna() & lon.notna() & ~((lat == 0) & (lon == 0))
+
+    rlat, rlon, rvalid = located(reference)
+    rvalid &= ~reference[area_column].astype(str).isin(EXCLUDED_AREAS)
+    ids = pd.Series("UNKNOWN", index=points.index)
+    plat, plon, pvalid = located(points)
+    if not rvalid.any() or not pvalid.any():
+        return ids
+
+    scale = METERS_PER_DEG_LAT * math.cos(math.radians(rlat[rvalid].mean()))
+    tree = cKDTree(np.c_[rlat[rvalid] * METERS_PER_DEG_LAT, rlon[rvalid] * scale])
+    dist, nearest = tree.query(
+        np.c_[plat[pvalid] * METERS_PER_DEG_LAT, plon[pvalid] * scale], k=1
+    )
+    areas = reference.loc[rvalid, area_column].astype(str).to_numpy()[nearest]
+    ids[pvalid] = np.where(dist <= max_m, areas, "UNKNOWN")
+    return ids
+
+
 def rolling_origins(
     times: pd.Series,
     history_days: int = 28,

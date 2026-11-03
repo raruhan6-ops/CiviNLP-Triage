@@ -163,6 +163,15 @@ python scripts/simultaneous_intervals.py --outcomes pavement_change pavement_dec
 
 `pavement_deficit` is the mean of 10 minus the rating over segments rated in the future window (higher is worse); `pavement_poor_share` is the share rated below 7. Outputs carry the `_pavement` tag: `rolling_info_grid500m_pavement.json`, `rolling_comparisons_grid500m_pavement.csv` and `rolling_comparisons_simultaneous_pavement.csv`.
 
+By zip code, as a check that the grid does not drive the pavement results: with `--area zip`, each rating takes the zip code of the nearest geocoded complaint within 300 m (on the complaints themselves, the nearest other complaint has the same zip 99.3% of the time; 0.02% of ratings have none within 300 m). Give the zip runs their own simultaneous-interval tag, so they do not overwrite the grid files:
+
+```bash
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area zip --ratings data_processed/pavement_ratings.parquet --outcomes pavement_deficit pavement_poor_share --horizon_days 91 --block 4 --tag _pavement --output_dir results/rolling/
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area zip --ratings data_processed/pavement_ratings.parquet --outcomes pavement_change pavement_decline --horizon_days 91 --block 4 --tag _pavement_change --output_dir results/rolling/
+python scripts/simultaneous_intervals.py --outcomes pavement_deficit pavement_poor_share --units zip --block 4 --tag _pavement_zip
+python scripts/simultaneous_intervals.py --outcomes pavement_change pavement_decline --units zip --block 4 --tag _pavement_change_zip
+```
+
 Agreement with a second, blind rater on the verdict table (see `docs/LABEL_GUIDE.md`):
 
 ```bash

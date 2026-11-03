@@ -6,6 +6,7 @@ from civinlp.eval.rolling_eval import (
     area_features,
     bootstrap_ci,
     grid_area_ids,
+    nearest_area_ids,
     paired_comparisons,
     priority_from_features,
     rolling_origins,
@@ -51,6 +52,26 @@ def test_grid_area_ids():
     assert ids[0] == ids[1]  # ~15 m apart
     assert ids[0] != ids[2]  # ~2 km apart
     assert ids[3] == "UNKNOWN" and ids[4] == "UNKNOWN"
+
+
+def test_nearest_area_ids():
+    complaints = pd.DataFrame(
+        {
+            "area_id": ["10001", "10002", "UNKNOWN"],
+            "latitude": [40.7000, 40.7100, 40.7050],
+            "longitude": [-74.0000, -74.0000, -74.0000],
+        }
+    )
+    ratings = pd.DataFrame(
+        {
+            "latitude": [40.7001, 40.7098, 40.7050, 40.8000, None],
+            "longitude": [-74.0000, -74.0000, -74.0000, -74.0000, -74.0],
+        }
+    )
+    ids = nearest_area_ids(ratings, complaints, max_m=300)
+    # The third rating sits on an unknown-zip complaint, which is skipped,
+    # and its nearest known complaint is ~555 m away
+    assert list(ids) == ["10001", "10002", "UNKNOWN", "UNKNOWN", "UNKNOWN"]
 
 
 def test_priority_from_features_matches_scorer():
