@@ -86,3 +86,17 @@ If manual labels are added in the future:
 - Multi-label scenarios (e.g., "pothole and broken sign"): assign the **primary** issue.
 - Severity should reflect the **described** severity, not inferred urgency.
 - Document any edge cases in a separate annotation log.
+
+---
+
+## DOT Resolution Verdicts (second rater)
+
+The confirmed-defect outcome labels each DOT resolution template with one verdict. A second rater labels every template blind, from `paper/verdict_second_rater.csv` (made by `python scripts/verdict_agreement.py make-sheet`), without looking at `docs/verdict_mapping.csv`. Write one of these three values in the `verdict` column:
+
+| Verdict | Use when the text says DOT... | Examples |
+|:---|:---|:---|
+| `confirmed` | found a defect, whether it repaired it, ordered or scheduled a repair, issued a summons or violation, or referred it to another agency to fix | "repaired the problem", "issued a summons", "scheduled the location for repair" |
+| `not_confirmed` | inspected and found no defect, or found the location meets its standards | "did not find the reported problem", "meets its standards", "in compliance with" |
+| `no_verdict` | did not report an inspection outcome: duplicates, pending or scheduled inspections, other jurisdictions, "see notes", requests for more information | "is a duplicate", "will research this service request", "not within DOT's jurisdiction" |
+
+Judge the template's wording only; do not guess what the inspector found. When the text could fit two verdicts, pick the one the words state and add a note in a `notes` column. Then score agreement with `python scripts/verdict_agreement.py score`, which reports Cohen's kappa per template and weighted by complaints, and lists every disagreement.

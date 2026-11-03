@@ -156,6 +156,13 @@ python scripts/simultaneous_intervals.py --outcomes pavement_deficit pavement_po
 
 `pavement_deficit` is the mean of 10 minus the rating over segments rated in the future window (higher is worse); `pavement_poor_share` is the share rated below 7. Outputs carry the `_pavement` tag: `rolling_info_grid500m_pavement.json`, `rolling_comparisons_grid500m_pavement.csv` and `rolling_comparisons_simultaneous_pavement.csv`.
 
+Agreement with a second, blind rater on the verdict table (see `docs/LABEL_GUIDE.md`):
+
+```bash
+python scripts/verdict_agreement.py make-sheet --sheet paper/verdict_second_rater.csv
+python scripts/verdict_agreement.py score --sheet paper/verdict_second_rater.csv
+```
+
 The template-to-verdict table behind the confirmed-share outcome is `docs/verdict_mapping.csv`; the phrase rules that produce it are in `civinlp/eval/outcome_eval.py`.
 
 Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:
