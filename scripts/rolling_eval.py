@@ -44,6 +44,12 @@ def main():
         default="grid",
         help="Ranking unit: zip code (area_id) or a lat/lon grid cell",
     )
+    parser.add_argument(
+        "--unit_name",
+        type=str,
+        help="Name of the area_id unit in output files (default 'zip'), e.g. "
+        "'nbhd' when area_id holds neighborhoods",
+    )
     parser.add_argument("--cell_m", type=float, default=500.0, help="Grid cell size")
     parser.add_argument("--history_days", type=int, default=28)
     parser.add_argument("--horizon_days", type=int, default=28)
@@ -88,7 +94,7 @@ def main():
     set_global_seed(args.seed)
     setup_logging(name="rolling_eval")
     os.makedirs(args.output_dir, exist_ok=True)
-    unit = "zip" if args.area == "zip" else f"grid{int(args.cell_m)}m"
+    unit = (args.unit_name or "zip") if args.area == "zip" else f"grid{int(args.cell_m)}m"
 
     if args.from_folds:
         rebuild_from_folds(
@@ -117,7 +123,7 @@ def main():
                 ratings, args.cell_m, ref_lat=grid_reference_lat(df)
             )
         else:
-            # Ratings have no zip code; take the nearest complaint's
+            # Ratings carry no area; take the nearest complaint's
             ratings["area_id"] = nearest_area_ids(ratings, df)
             logger.info(
                 f"{(ratings['area_id'] == 'UNKNOWN').mean():.2%} of ratings "

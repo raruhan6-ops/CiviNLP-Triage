@@ -187,6 +187,21 @@ Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) 
 python scripts/verdict_sensitivity.py --data data_processed/roads_processed_2y_res.parquet --output results/rolling/verdict_sensitivity.csv
 ```
 
+#### Second city: San Francisco
+
+The same evaluation on DataSF data: SF311 street, sidewalk and curb defect requests (dataset `vw6y-z8j6`, 1 Jul 2016 to 31 Dec 2025) and Public Works pavement condition history (`78va-8dhi`). `civinlp.data.sf` maps SF subtypes onto the NYC complaint types (Street, Sidewalk or Curb Condition), keeps the subtype as the descriptor, and divides PCI (0 to 100) by 10, so the NYC outcomes and severity rules apply unchanged. A survey that follows a repair loses its previous rating, so rating-change outcomes skip it.
+
+Public Works surveys nearly every block once a year, almost all between July and October, so folds are annual: a 365-day history, a 184-day future window starting about 1 July, one fold per year (9 folds: 3 tuning, 6 test, 2020 to 2025). SF311 has no zip code; areas are the 41 analysis neighborhoods (`--unit_name nbhd`) or 500 m grid cells. The confirmed-defect outcome is not run, because SF status notes are mostly generic ("Case Resolved").
+
+```bash
+python -m civinlp.data.sf --since 2016-07-01 --until 2026-01-01
+python scripts/rolling_eval.py --data data_processed/sf311_roads.parquet --ratings data_processed/sf_pavement_ratings.parquet --history_days 365 --horizon_days 184 --step_days 365 --block 2 --output_dir results/rolling_sf/ --outcomes volume resolution_days pavement_deficit pavement_poor_share pavement_change pavement_decline --area zip --unit_name nbhd
+python scripts/rolling_eval.py --data data_processed/sf311_roads.parquet --ratings data_processed/sf_pavement_ratings.parquet --history_days 365 --horizon_days 184 --step_days 365 --block 2 --output_dir results/rolling_sf/ --outcomes volume resolution_days pavement_deficit pavement_poor_share pavement_change pavement_decline --area grid --cell_m 500
+python scripts/simultaneous_intervals.py --output_dir results/rolling_sf/ --outcomes volume resolution_days --units nbhd grid500m --block 2
+python scripts/simultaneous_intervals.py --output_dir results/rolling_sf/ --outcomes pavement_deficit pavement_poor_share --units nbhd grid500m --block 2 --tag _pavement
+python scripts/simultaneous_intervals.py --output_dir results/rolling_sf/ --outcomes pavement_change pavement_decline --units nbhd grid500m --block 2 --tag _pavement_change
+```
+
 ### 6. Launch Dashboard
 
 ```bash
