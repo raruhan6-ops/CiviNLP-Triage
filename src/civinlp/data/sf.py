@@ -49,7 +49,12 @@ SF311_COLUMNS = [
     "analysis_neighborhood",
 ]
 # Service names of road defect requests; the names changed during the period
-SF311_SERVICES = ["Street Defects", "Street Defect", "Sidewalk or Curb", "Sidewalk and Curb"]
+SF311_SERVICES = [
+    "Street Defects",
+    "Street Defect",
+    "Sidewalk or Curb",
+    "Sidewalk and Curb",
+]
 
 SF_PAVEMENT_COLUMNS = [
     "cnn",
@@ -121,7 +126,10 @@ def download_sf311(output_path: str, since: str, until: str) -> pd.DataFrame:
 def download_sf_pavement(output_path: str) -> pd.DataFrame:
     """Every survey and treatment record to a CSV."""
     return _download(
-        SF_PAVEMENT_RESOURCE, SF_PAVEMENT_COLUMNS, "pci_change_date IS NOT NULL", output_path
+        SF_PAVEMENT_RESOURCE,
+        SF_PAVEMENT_COLUMNS,
+        "pci_change_date IS NOT NULL",
+        output_path,
     )
 
 
@@ -141,7 +149,9 @@ def sf_complaint_types(raw: pd.DataFrame) -> pd.DataFrame:
     details appended when they add something (the kind of sidewalk defect).
     """
     subtype = raw["service_subtype"].astype(str).str.strip().str.lower()
-    street_service = raw["service_name"].astype(str).str.lower().str.startswith("street")
+    street_service = (
+        raw["service_name"].astype(str).str.lower().str.startswith("street")
+    )
     ctype = np.select(
         [
             subtype.isin(CURB_SUBTYPES),
@@ -149,7 +159,12 @@ def sf_complaint_types(raw: pd.DataFrame) -> pd.DataFrame:
             subtype.isin(STREET_SUBTYPES),
             street_service,
         ],
-        ["Curb Condition", "Sidewalk Condition", "Street Condition", "Street Condition"],
+        [
+            "Curb Condition",
+            "Sidewalk Condition",
+            "Street Condition",
+            "Street Condition",
+        ],
         default="Sidewalk Condition",
     )
     known = subtype.isin(CURB_SUBTYPES | SIDEWALK_SUBTYPES | STREET_SUBTYPES)
@@ -157,7 +172,9 @@ def sf_complaint_types(raw: pd.DataFrame) -> pd.DataFrame:
     details = raw["service_details"].map(_label)
     adds = known & (details != "") & (details.str.lower() != sub_label.str.lower())
     descriptor = sub_label.where(~adds, sub_label + ": " + details)
-    return pd.DataFrame({"complaint_type": ctype, "descriptor": descriptor}, index=raw.index)
+    return pd.DataFrame(
+        {"complaint_type": ctype, "descriptor": descriptor}, index=raw.index
+    )
 
 
 def preprocess_sf311(raw: pd.DataFrame) -> pd.DataFrame:
@@ -252,7 +269,9 @@ if __name__ == "__main__":
     parser.add_argument("--since", type=str, default="2016-07-01")
     parser.add_argument("--until", type=str, default="2026-01-01")
     parser.add_argument("--raw", type=str, default="data_raw/sf311_roads.csv")
-    parser.add_argument("--output", type=str, default="data_processed/sf311_roads.parquet")
+    parser.add_argument(
+        "--output", type=str, default="data_processed/sf311_roads.parquet"
+    )
     parser.add_argument("--pavement_raw", type=str, default="data_raw/sf_pavement.csv")
     parser.add_argument(
         "--pavement_output",

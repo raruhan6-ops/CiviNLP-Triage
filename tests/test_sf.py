@@ -46,7 +46,14 @@ def _raw311():
             ],
             "lat": ["37.77", "37.78", "0", "37.76", "37.75", "37.75"],
             "long": ["-122.42", "-122.41", "0", "-122.43", "-122.44", "-122.44"],
-            "analysis_neighborhood": ["Mission", "Mission", None, "Excelsior", "Excelsior", "Excelsior"],
+            "analysis_neighborhood": [
+                "Mission",
+                "Mission",
+                None,
+                "Excelsior",
+                "Excelsior",
+                "Excelsior",
+            ],
         }
     )
 
@@ -73,7 +80,9 @@ def test_preprocess_sf311_schema_and_severity():
     out = preprocess_sf311(_raw311())
     assert len(out) == 5  # duplicate request id dropped
     assert out.loc[2, "area_id"] == "UNKNOWN" and np.isnan(out.loc[2, "latitude"])
-    severity = [str(s.value) for s in RuleBaseline().predict_severity(out["text"].tolist())]
+    severity = [
+        str(s.value) for s in RuleBaseline().predict_severity(out["text"].tolist())
+    ]
     assert severity[0] == "low" and severity[1] == "high"
 
 
@@ -89,7 +98,13 @@ def test_pavement_rescaled_and_repairs_drop_previous_rating():
                 "2022-08-01",
                 "2023-08-01",
             ],
-            "treatment_or_survey": ["Survey", "Treatment", "Survey", "Survey", "Survey"],
+            "treatment_or_survey": [
+                "Survey",
+                "Treatment",
+                "Survey",
+                "Survey",
+                "Survey",
+            ],
             "latitude": ["37.7", "37.7", "37.7", "37.8", "37.8"],
             "longitude": ["-122.4", "-122.4", "-122.4", "-122.5", "-122.5"],
         }

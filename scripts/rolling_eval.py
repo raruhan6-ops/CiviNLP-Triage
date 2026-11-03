@@ -94,7 +94,9 @@ def main():
     set_global_seed(args.seed)
     setup_logging(name="rolling_eval")
     os.makedirs(args.output_dir, exist_ok=True)
-    unit = (args.unit_name or "zip") if args.area == "zip" else f"grid{int(args.cell_m)}m"
+    unit = (
+        (args.unit_name or "zip") if args.area == "zip" else f"grid{int(args.cell_m)}m"
+    )
 
     if args.from_folds:
         rebuild_from_folds(
