@@ -169,7 +169,7 @@ pytest tests/ -v --ignore=tests/test_advanced_models.py
 
 ## Citation
 
-If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). Each release is archived on Zenodo: version 1.0.0 is [doi:10.5281/zenodo.23911190](https://doi.org/10.5281/zenodo.23911190), and [doi:10.5281/zenodo.23911189](https://doi.org/10.5281/zenodo.23911189) always points to the latest version.
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). Each release is archived on Zenodo: version 1.0.0 is [doi:10.5281/zenodo.23911190](https://doi.org/10.5281/zenodo.23911190), and [doi:10.5281/zenodo.23911189](https://doi.org/10.5281/zenodo.23911189) always points to the latest version. The evaluation results behind the paper are archived separately as [doi:10.5281/zenodo.23915186](https://doi.org/10.5281/zenodo.23915186).
 
 ## License
 
