@@ -50,11 +50,20 @@ python scripts/run_pipeline.py --transformer
 
 ### 1. Data Download
 
+Two-year data used in the paper (298,193 complaints, 1 Nov 2024 to 1 Nov 2026):
+
+```bash
+python -m civinlp.data.download_roads_311 --monthly --since 2024-11-01 --until 2026-11-02 \
+    --output data_raw/roads_311_2y_res.parquet
+```
+
+Only the seven road complaint types are requested, one calendar month at a time, with gzip transfers and retries. Each month is saved to `data_raw/roads_311_2y_res_months/` as soon as it completes, so an interrupted run resumes where it stopped. Request status, closing dates and resolution text change over time, so a later download can differ from ours.
+
+The 20,000-row pilot sample instead takes the most recent requests, so it depends on the download date:
+
 ```bash
 python -m civinlp.data.download_roads_311 --limit 20000 --output data_raw/roads_311.parquet
 ```
-
-Only road complaint types are requested, in pages of 5,000 rows with retries. Results depend on the download date, because the API always returns the most recent requests.
 
 Bridges (optional; download a state's delimited NBI file from FHWA first):
 
@@ -67,6 +76,9 @@ python -m civinlp.data.preprocess_bridges --input data_raw/bridges_nbi.parquet -
 
 ```bash
 python -m civinlp.data.preprocess_roads --input data_raw/roads_311.parquet --output data_processed/roads_processed.parquet
+
+# Two-year data for the paper
+python -m civinlp.data.preprocess_roads --input data_raw/roads_311_2y_res.parquet --output data_processed/roads_processed_2y_res.parquet
 ```
 
 ### 3. Model Training
@@ -99,13 +111,46 @@ What is evaluated against what:
 | Ranking | Future outcomes after a time cutoff: complaint volume per area, and median days to close |
 | Review routing | Accuracy of auto-handled vs. routed predictions at each confidence threshold |
 
-### 5. Launch Dashboard
+### 5. Rolling Out-of-Time Evaluation (Paper Tables 3 and 4)
+
+```bash
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area zip --output_dir results/rolling/
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area grid --cell_m 500 --output_dir results/rolling/
+```
+
+Each run evaluates all three outcomes (future volume, resolution days, confirmed-defect share) with 28-day history and future windows advancing 28 days at a time. The first 30% of folds (8 of 25) tune the priority weights and fit the ridge rankers; the remaining 17 are test folds. Rule severity is recomputed from `text` on every run.
+
+| File | Contents | Paper |
+|:---|:---|:---|
+| `rolling_folds_<outcome>_<unit>.csv` | Every metric for every ranker on every test fold | Source of all numbers |
+| `rolling_summary_<outcome>_<unit>.csv` | Mean per ranker and metric, with the difference from count-only | Table 3 (`spearman_vs_future` rows, `mean` column) |
+| `rolling_comparisons_<unit>.csv` | Paired per-fold differences between rankers (severity added to volume, type added to volume, and so on) | Table 4 and the differences quoted in Section 6 |
+| `rolling_info_<unit>.json` | Fold cutoffs, tuned priority weights, chosen ridge penalties, areas ranked per fold | Section 4 penalties, "Tuned weights" in Section 6 |
+
+`<unit>` is `zip` or `grid500m`. All intervals are 95% moving-block bootstrap intervals (blocks of 3 consecutive folds, 5,000 resamples, seed 42), because adjacent folds share data.
+
+To recompute the summaries and comparisons from saved per-fold files without rerunning the folds (for example after changing the bootstrap):
+
+```bash
+python scripts/rolling_eval.py --from_folds --area zip --output_dir results/rolling/
+python scripts/rolling_eval.py --from_folds --area grid --cell_m 500 --output_dir results/rolling/
+```
+
+The template-to-verdict table behind the confirmed-share outcome is `docs/verdict_mapping.csv`; the phrase rules that produce it are in `civinlp/eval/outcome_eval.py`.
+
+Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:
+
+```bash
+python scripts/verdict_sensitivity.py --data data_processed/roads_processed_2y_res.parquet --output results/rolling/verdict_sensitivity.csv
+```
+
+### 6. Launch Dashboard
 
 ```bash
 streamlit run src/civinlp/ui/streamlit_app.py
 ```
 
-### 6. Launch API
+### 7. Launch API
 
 ```bash
 uvicorn civinlp.api.main:app --reload
@@ -151,6 +196,11 @@ results/
   ranking_results_resolution_days.csv       # Ranking vs future resolution time
   ranking_sensitivity*.csv                  # Priority score across weight settings
   evaluation_summary.json                   # Everything above in one JSON
+  rolling/                                  # Rolling evaluation (step 5), per unit and outcome
+    rolling_folds_*.csv
+    rolling_summary_*.csv
+    rolling_comparisons_*.csv
+    rolling_info_*.json
 ```
 
 ---

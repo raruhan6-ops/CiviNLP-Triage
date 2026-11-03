@@ -176,6 +176,11 @@ def test_confirmed_share_outcome():
     assert counts == {"A": 1.0, "B": 0.25}
     assert critical == {"A"}
 
+    # A precomputed verdict column overrides the phrase rules
+    overridden = future.assign(verdict=[0.0] * 3 + [None] + [1.0] * 4 + [1.0] * 2)
+    counts, _ = future_outcomes(history, overridden, outcome="confirmed_share")
+    assert counts == {"A": 0.0, "B": 1.0}
+
 
 def test_spearman_treats_tied_scores_as_ties():
     # Three areas tie on score; their outcomes happen to follow id order.

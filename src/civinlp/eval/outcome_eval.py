@@ -185,11 +185,17 @@ def future_outcomes(
     if outcome == "volume":
         counts = {a: float(future_counts.get(a, 0)) for a in areas}
     elif outcome == "confirmed_share":
-        if "resolution_description" not in future.columns:
+        # A precomputed `verdict` column (1, 0 or NaN) overrides the phrase
+        # rules, so sensitivity runs can reassign individual templates.
+        if "verdict" in future.columns:
+            verdict = future["verdict"].astype(float)
+        elif "resolution_description" in future.columns:
+            verdict = resolution_verdict(future["resolution_description"])
+        else:
             raise ValueError(
-                "confirmed_share outcome needs a 'resolution_description' column"
+                "confirmed_share outcome needs a 'resolution_description' "
+                "or 'verdict' column"
             )
-        verdict = resolution_verdict(future["resolution_description"])
         by_area = verdict.groupby(future_areas).agg(["mean", "count"])
         counts = {
             a: float(by_area.at[a, "mean"])
