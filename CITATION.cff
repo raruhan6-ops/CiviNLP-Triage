@@ -4,7 +4,6 @@ title: "CiviNLP Triage: Out-of-Time Evaluation of 311 Road-Maintenance Triage"
 type: software
 authors:
   - name: "Rejuan Ahmed Ruhan"
-  - name: "Shanjana Dil Afruz"
 version: "1.0.0"
 url: "https://github.com/raruhan6-ops/CiviNLP-Triage"
 repository-code: "https://github.com/raruhan6-ops/CiviNLP-Triage"

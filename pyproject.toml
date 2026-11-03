@@ -4,7 +4,6 @@ version = "1.0.0"
 description = "Out-of-time evaluation of 311 road-maintenance triage, with a reproducible ranking pipeline, dashboard and API."
 authors = [
     {name = "Rejuan Ahmed Ruhan", email = "ra.ruhan6@gmail.com"},
-    {name = "Shanjana Dil Afruz"},
 ]
 dependencies = [
     "pandas>=2.0.0,<3.0",
