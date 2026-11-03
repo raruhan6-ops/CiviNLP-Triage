@@ -5,6 +5,7 @@
 [![CI](https://github.com/raruhan6-ops/CiviNLP-Triage/actions/workflows/ci.yaml/badge.svg)](https://github.com/raruhan6-ops/CiviNLP-Triage/actions/workflows/ci.yaml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/1147109839.svg)](https://doi.org/10.5281/zenodo.23911189)
 
 CiviNLP Triage ranks areas of a city by where road maintenance is likely needed, from public 311 complaint records. It labels each complaint with a defect type and a rule-based severity, aggregates complaints by zip code, neighbourhood or 500 m grid cell, and ranks areas by volume, severity and complaint mix.
 
@@ -168,7 +169,7 @@ pytest tests/ -v --ignore=tests/test_advanced_models.py
 
 ## Citation
 
-If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff).
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). Each release is archived on Zenodo: version 1.0.0 is [doi:10.5281/zenodo.23911190](https://doi.org/10.5281/zenodo.23911190), and [doi:10.5281/zenodo.23911189](https://doi.org/10.5281/zenodo.23911189) always points to the latest version.
 
 ## License
 

@@ -5,6 +5,15 @@ type: software
 authors:
   - name: "Rejuan Ahmed Ruhan"
 version: "1.0.0"
+date-released: "2026-11-03"
+doi: "10.5281/zenodo.23911189"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23911189"
+    description: "All versions (concept DOI)"
+  - type: doi
+    value: "10.5281/zenodo.23911190"
+    description: "Version 1.0.0"
 url: "https://github.com/raruhan6-ops/CiviNLP-Triage"
 repository-code: "https://github.com/raruhan6-ops/CiviNLP-Triage"
 license: MIT
