@@ -144,6 +144,18 @@ python scripts/simultaneous_intervals.py --output_dir results/rolling/
 
 This writes `rolling_comparisons_simultaneous.csv`, with the unadjusted and the simultaneous interval for each comparison side by side.
 
+#### Pavement condition (independent outcome)
+
+NYC DOT street pavement ratings (dataset `6yyb-pb25`, 1 to 10 per street segment) grade the same complaint-based rankings against measured road condition. Ratings have no zip code, so this runs by grid cell only, on the complaints' grid. Each segment is re-rated about every 14 months, so a 28-day window holds too few ratings; the future window is 91 days, the cutoff still moves 28 days at a time, and the bootstrap blocks are 4 folds long to cover the overlap.
+
+```bash
+python -m civinlp.data.pavement --raw data_raw/pavement_ratings.csv --output data_processed/pavement_ratings.parquet
+python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet --area grid --ratings data_processed/pavement_ratings.parquet --outcomes pavement_deficit pavement_poor_share --horizon_days 91 --block 4 --tag _pavement --output_dir results/rolling/
+python scripts/simultaneous_intervals.py --outcomes pavement_deficit pavement_poor_share --units grid500m --block 4 --tag _pavement
+```
+
+`pavement_deficit` is the mean of 10 minus the rating over segments rated in the future window (higher is worse); `pavement_poor_share` is the share rated below 7. Outputs carry the `_pavement` tag: `rolling_info_grid500m_pavement.json`, `rolling_comparisons_grid500m_pavement.csv` and `rolling_comparisons_simultaneous_pavement.csv`.
+
 The template-to-verdict table behind the confirmed-share outcome is `docs/verdict_mapping.csv`; the phrase rules that produce it are in `civinlp/eval/outcome_eval.py`.
 
 Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:

@@ -84,9 +84,14 @@ def grid_area_ids(
     cell_m: float = 500.0,
     lat_column: str = "latitude",
     lon_column: str = "longitude",
+    ref_lat: Optional[float] = None,
 ) -> pd.Series:
     """
     Assign each row to a square lat/lon grid cell of about `cell_m` metres.
+
+    The east-west cell width depends on a reference latitude, by default the
+    mean latitude of `df`. Pass the same `ref_lat` (see `grid_reference_lat`)
+    to place a second dataset, such as pavement ratings, on the same grid.
 
     Rows with missing or (0, 0) coordinates get "UNKNOWN", which the evaluation
     excludes like an unknown zip code.
@@ -97,13 +102,24 @@ def grid_area_ids(
     if not valid.any():
         return pd.Series("UNKNOWN", index=df.index)
 
+    if ref_lat is None:
+        ref_lat = lat[valid].mean()
     dlat = cell_m / METERS_PER_DEG_LAT
-    dlon = cell_m / (METERS_PER_DEG_LAT * math.cos(math.radians(lat[valid].mean())))
+    dlon = cell_m / (METERS_PER_DEG_LAT * math.cos(math.radians(ref_lat)))
     i = np.floor(lat[valid] / dlat).astype(int).astype(str)
     j = np.floor(lon[valid] / dlon).astype(int).astype(str)
     ids = pd.Series("UNKNOWN", index=df.index)
     ids[valid] = "g" + i + "_" + j
     return ids
+
+
+def grid_reference_lat(
+    df: pd.DataFrame, lat_column: str = "latitude", lon_column: str = "longitude"
+) -> float:
+    """The reference latitude `grid_area_ids` uses for `df` by default."""
+    lat = pd.to_numeric(df[lat_column], errors="coerce")
+    lon = pd.to_numeric(df[lon_column], errors="coerce")
+    return float(lat[lat.notna() & lon.notna() & ~((lat == 0) & (lon == 0))].mean())
 
 
 def rolling_origins(
@@ -270,13 +286,20 @@ def _prepare_folds(
     outcome: str,
     critical_frac: float,
     descriptors: Optional[List[str]] = None,
+    outcome_df: Optional[pd.DataFrame] = None,
 ) -> List[Dict]:
-    """Features and outcomes for each fold; folds with no rankable areas are dropped."""
+    """
+    Features and outcomes for each fold; folds with no rankable areas are
+    dropped. The future window is taken from `outcome_df` when given (e.g.
+    pavement ratings), else from the complaints themselves.
+    """
     times = pd.to_datetime(df[time_column], errors="coerce")
+    source = df if outcome_df is None else outcome_df
+    source_times = pd.to_datetime(source[time_column], errors="coerce")
     prepared = []
     for start, cutoff, end in folds:
         history = df[(times >= start) & (times < cutoff)]
-        future = df[(times >= cutoff) & (times < end)]
+        future = source[(source_times >= cutoff) & (source_times < end)]
         counts, critical = future_outcomes(
             history, future, area_column, critical_frac, outcome=outcome
         )
@@ -596,9 +619,16 @@ def run_rolling_evaluation(
     weight_grid: Optional[List[Dict[str, float]]] = None,
     tune_metric: Optional[str] = None,
     seed: int = 42,
+    outcome_df: Optional[pd.DataFrame] = None,
+    block: int = BLOCK_SIZE,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     """
     Run the full rolling-origin evaluation.
+
+    `outcome_df` supplies the future window instead of the complaints (pavement
+    ratings, with the same area and time columns). `block` is the bootstrap
+    block length in folds: with a horizon longer than the step, future windows
+    overlap, and a block should span about horizon_days / step_days folds.
 
     Returns:
         per_fold: one row per (test fold, ranking) with all metrics.
@@ -615,7 +645,14 @@ def run_rolling_evaluation(
         times = pd.to_datetime(df[time_column], errors="coerce")
         descriptors = sorted(descriptor_keys(df[times < tuning_end]).unique())
     prepared = _prepare_folds(
-        df, folds, area_column, time_column, outcome, critical_frac, descriptors
+        df,
+        folds,
+        area_column,
+        time_column,
+        outcome,
+        critical_frac,
+        descriptors,
+        outcome_df,
     )
     if len(prepared) < 3:
         raise ValueError(
@@ -650,12 +687,13 @@ def run_rolling_evaluation(
     metrics = [
         c for c in per_fold.columns if c.startswith(("ndcg@", "recall@", "spearman"))
     ]
-    summary = summarize_folds(per_fold, metrics, seed=seed)
+    summary = summarize_folds(per_fold, metrics, seed=seed, block=block)
     info = {
         "outcome": outcome,
         "history_days": history_days,
         "horizon_days": horizon_days,
         "step_days": step_days,
+        "bootstrap_block": block,
         "tuning_folds": [str(f["cutoff"]) for f in tuning],
         "test_folds": [str(f["cutoff"]) for f in testing],
         "mean_rankable_areas": float(np.mean([len(f["counts"]) for f in testing])),

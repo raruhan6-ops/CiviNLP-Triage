@@ -15,8 +15,11 @@ import os
 
 import pandas as pd
 
+from civinlp.eval.outcome_eval import PAVEMENT_OUTCOMES
 from civinlp.eval.rolling_eval import (
+    BLOCK_SIZE,
     grid_area_ids,
+    grid_reference_lat,
     paired_comparisons,
     run_rolling_evaluation,
     summarize_folds,
@@ -58,6 +61,23 @@ def main():
     parser.add_argument("--k", type=int, nargs="+", default=[10, 50])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--ratings",
+        type=str,
+        help="Processed pavement ratings (needed for the pavement_* outcomes)",
+    )
+    parser.add_argument(
+        "--block",
+        type=int,
+        default=BLOCK_SIZE,
+        help="Bootstrap block length in folds (about horizon_days / step_days)",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default="",
+        help="Suffix for the run's info and comparisons files, e.g. _pavement",
+    )
+    parser.add_argument(
         "--from_folds",
         action="store_true",
         help="Rebuild summaries and comparisons from saved per-fold files",
@@ -70,7 +90,9 @@ def main():
     unit = "zip" if args.area == "zip" else f"grid{int(args.cell_m)}m"
 
     if args.from_folds:
-        rebuild_from_folds(args.output_dir, unit, args.outcomes, args.seed)
+        rebuild_from_folds(
+            args.output_dir, unit, args.outcomes, args.seed, args.block, args.tag
+        )
         return
 
     df = pd.read_parquet(args.data)
@@ -82,6 +104,16 @@ def main():
     ]
     if args.area == "grid":
         df["area_id"] = grid_area_ids(df, args.cell_m)
+
+    ratings = None
+    if PAVEMENT_OUTCOMES & set(args.outcomes):
+        if not args.ratings or args.area != "grid":
+            parser.error("pavement outcomes need --ratings and --area grid")
+        # Ratings have no zip code; place them on the complaints' grid
+        ratings = pd.read_parquet(args.ratings)
+        ratings["area_id"] = grid_area_ids(
+            ratings, args.cell_m, ref_lat=grid_reference_lat(df)
+        )
 
     report = {"data": args.data, "rows": len(df), "unit": unit, "outcomes": {}}
     comparisons = []
@@ -102,6 +134,8 @@ def main():
             tune_frac=args.tune_frac,
             k_values=args.k,
             seed=args.seed,
+            outcome_df=ratings if outcome in PAVEMENT_OUTCOMES else None,
+            block=args.block,
         )
         tag = f"{outcome}_{unit}"
         per_fold.to_csv(
@@ -112,7 +146,9 @@ def main():
         )
         report["outcomes"][outcome] = info
         comparisons.append(
-            paired_comparisons(per_fold, seed=args.seed).assign(outcome=outcome)
+            paired_comparisons(per_fold, seed=args.seed, block=args.block).assign(
+                outcome=outcome
+            )
         )
 
         print(f"\n=== {outcome} | {unit} | {len(info['test_folds'])} test folds ===")
@@ -123,9 +159,10 @@ def main():
         ]
         print(view.round(3).to_string(index=False))
 
-    with open(os.path.join(args.output_dir, f"rolling_info_{unit}.json"), "w") as f:
+    info_path = os.path.join(args.output_dir, f"rolling_info_{unit}{args.tag}.json")
+    with open(info_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
-    save_comparisons(comparisons, args.output_dir, unit)
+    save_comparisons(comparisons, args.output_dir, unit + args.tag)
     print(f"\nResults saved to {args.output_dir}")
 
 
@@ -141,12 +178,12 @@ def save_comparisons(comparisons, output_dir, unit):
     print(table.drop(columns=["metric"]).round(3).to_string(index=False))
 
 
-def rebuild_from_folds(output_dir, unit, outcomes, seed):
+def rebuild_from_folds(output_dir, unit, outcomes, seed, block=BLOCK_SIZE, tag=""):
     """Recompute summaries and comparisons from saved rolling_folds_*.csv files."""
     comparisons = []
     for outcome in outcomes:
-        tag = f"{outcome}_{unit}"
-        path = os.path.join(output_dir, f"rolling_folds_{tag}.csv")
+        name = f"{outcome}_{unit}"
+        path = os.path.join(output_dir, f"rolling_folds_{name}.csv")
         if not os.path.exists(path):
             print(f"No {path}; skipping {outcome}.")
             continue
@@ -156,13 +193,13 @@ def rebuild_from_folds(output_dir, unit, outcomes, seed):
             for c in per_fold.columns
             if c.startswith(("ndcg@", "recall@", "spearman"))
         ]
-        summarize_folds(per_fold, metrics, seed=seed).to_csv(
-            os.path.join(output_dir, f"rolling_summary_{tag}.csv"), index=False
+        summarize_folds(per_fold, metrics, seed=seed, block=block).to_csv(
+            os.path.join(output_dir, f"rolling_summary_{name}.csv"), index=False
         )
         comparisons.append(
-            paired_comparisons(per_fold, seed=seed).assign(outcome=outcome)
+            paired_comparisons(per_fold, seed=seed, block=block).assign(outcome=outcome)
         )
-    save_comparisons(comparisons, output_dir, unit)
+    save_comparisons(comparisons, output_dir, unit + tag)
 
 
 if __name__ == "__main__":

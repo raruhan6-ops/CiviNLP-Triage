@@ -2,6 +2,7 @@
 Simultaneous intervals for every paired comparison in the rolling evaluation.
 
     python scripts/simultaneous_intervals.py --output_dir results/rolling/
+    python scripts/simultaneous_intervals.py --outcomes pavement_deficit         pavement_poor_share --units grid500m --block 4 --tag _pavement
 
 Reads the rolling_folds_<outcome>_<unit>.csv files written by
 scripts/rolling_eval.py, forms every paired difference in PAIRED_COMPARISONS
@@ -16,6 +17,7 @@ import os
 import pandas as pd
 
 from civinlp.eval.rolling_eval import (
+    BLOCK_SIZE,
     PAIRED_COMPARISONS,
     bootstrap_ci,
     simultaneous_intervals,
@@ -30,11 +32,19 @@ def main():
     parser.add_argument("--output_dir", type=str, default="results/rolling/")
     parser.add_argument("--metric", type=str, default="spearman_vs_future")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--outcomes", nargs="+", default=OUTCOMES)
+    parser.add_argument("--units", nargs="+", default=UNITS)
+    parser.add_argument(
+        "--block", type=int, default=BLOCK_SIZE, help="Bootstrap block in folds"
+    )
+    parser.add_argument(
+        "--tag", type=str, default="", help="Suffix for the output file name"
+    )
     args = parser.parse_args()
 
     columns, keys = {}, []
-    for outcome in OUTCOMES:
-        for unit in UNITS:
+    for outcome in args.outcomes:
+        for unit in args.units:
             path = os.path.join(args.output_dir, f"rolling_folds_{outcome}_{unit}.csv")
             if not os.path.exists(path):
                 print(f"No {path}; skipping.")
@@ -50,10 +60,13 @@ def main():
 
     # Cutoffs sort in time order; every file must cover the same folds
     diffs = pd.DataFrame(columns).sort_index()
-    table, crit = simultaneous_intervals(diffs, seed=args.seed)
+    table, crit = simultaneous_intervals(diffs, seed=args.seed, block=args.block)
     table[["outcome", "unit", "comparison"]] = pd.DataFrame(keys)
     lows, highs = zip(
-        *(bootstrap_ci(diffs[c].to_numpy(), seed=args.seed) for c in diffs.columns)
+        *(
+            bootstrap_ci(diffs[c].to_numpy(), seed=args.seed, block=args.block)
+            for c in diffs.columns
+        )
     )
     table["ci_low"], table["ci_high"] = lows, highs
     table["excludes_zero"] = (table["ci_low"] > 0) | (table["ci_high"] < 0)
@@ -78,7 +91,9 @@ def main():
         ]
     ]
 
-    path = os.path.join(args.output_dir, "rolling_comparisons_simultaneous.csv")
+    path = os.path.join(
+        args.output_dir, f"rolling_comparisons_simultaneous{args.tag}.csv"
+    )
     table.to_csv(path, index=False)
     print(
         f"{len(table)} comparisons over {len(diffs)} folds; critical value {crit:.2f}"

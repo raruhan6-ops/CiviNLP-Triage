@@ -75,7 +75,18 @@ OUTCOMES = {
         "ordered a repair or correction) among those with an inspection verdict; "
         "areas with too few verdicts excluded"
     ),
+    "pavement_deficit": (
+        "mean of 10 minus the DOT pavement rating over street segments rated in "
+        "the future window (higher = worse road); areas with too few ratings "
+        "excluded"
+    ),
+    "pavement_poor_share": (
+        "share of street segments rated in the future window with a DOT pavement "
+        "rating below 7; areas with too few ratings excluded"
+    ),
 }
+PAVEMENT_OUTCOMES = {"pavement_deficit", "pavement_poor_share"}
+POOR_RATING = 7.0  # DOT: 8-10 good, 4-7 fair (7 counts as good on local streets)
 
 # NYC 311 resolution_description is templated (~150 variants). These phrases
 # mark an inspection verdict (every template was reviewed by hand; the result
@@ -165,7 +176,10 @@ def future_outcomes(
             (median days to close them; areas with fewer than `min_future`
             future complaints are left out, since their median is noise), or
             "confirmed_share" (share of future complaints with a confirmed
-            defect, over areas with at least `min_future` verdicts).
+            defect, over areas with at least `min_future` verdicts), or
+            "pavement_deficit" / "pavement_poor_share" (from DOT pavement
+            ratings in `future`: mean 10 - rating, or the share rated below
+            POOR_RATING, over areas with at least `min_future` ratings).
 
     Returns:
         relevance: area -> outcome value. Used directly as NDCG relevance with
@@ -197,6 +211,22 @@ def future_outcomes(
                 "or 'verdict' column"
             )
         by_area = verdict.groupby(future_areas).agg(["mean", "count"])
+        counts = {
+            a: float(by_area.at[a, "mean"])
+            for a in areas
+            if a in by_area.index and by_area.at[a, "count"] >= min_future
+        }
+        areas = list(counts)
+    elif outcome in PAVEMENT_OUTCOMES:
+        # `future` here holds pavement ratings, not complaints
+        if "rating" not in future.columns:
+            raise ValueError(f"{outcome} outcome needs a 'rating' column")
+        rating = pd.to_numeric(future["rating"], errors="coerce")
+        if outcome == "pavement_deficit":
+            badness = 10.0 - rating
+        else:
+            badness = (rating < POOR_RATING).astype(float).where(rating.notna())
+        by_area = badness.groupby(future_areas).agg(["mean", "count"])
         counts = {
             a: float(by_area.at[a, "mean"])
             for a in areas
