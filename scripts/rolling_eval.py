@@ -1,8 +1,11 @@
 """
 Rolling-origin ranking evaluation (see civinlp.eval.rolling_eval).
 
-    python scripts/rolling_eval.py --data data_processed/roads_processed_2y.parquet \
+    python scripts/rolling_eval.py --data data_processed/roads_processed_2y_res.parquet \
         --area grid --cell_m 500 --output_dir results/rolling/
+
+With --from_folds, the summaries and paired comparisons are rebuilt from the
+rolling_folds_*.csv files already in --output_dir, without rerunning the folds.
 """
 
 import argparse
@@ -12,7 +15,12 @@ import os
 
 import pandas as pd
 
-from civinlp.eval.rolling_eval import grid_area_ids, run_rolling_evaluation
+from civinlp.eval.rolling_eval import (
+    grid_area_ids,
+    paired_comparisons,
+    run_rolling_evaluation,
+    summarize_folds,
+)
 from civinlp.models.baseline_rules import RuleBaseline
 from civinlp.utils.logging_config import setup_logging
 from civinlp.utils.seed import set_global_seed
@@ -49,11 +57,21 @@ def main():
     )
     parser.add_argument("--k", type=int, nargs="+", default=[10, 50])
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--from_folds",
+        action="store_true",
+        help="Rebuild summaries and comparisons from saved per-fold files",
+    )
     args = parser.parse_args()
 
     set_global_seed(args.seed)
     setup_logging(name="rolling_eval")
     os.makedirs(args.output_dir, exist_ok=True)
+    unit = "zip" if args.area == "zip" else f"grid{int(args.cell_m)}m"
+
+    if args.from_folds:
+        rebuild_from_folds(args.output_dir, unit, args.outcomes, args.seed)
+        return
 
     df = pd.read_parquet(args.data)
     df["predicted_severity"] = [
@@ -64,9 +82,9 @@ def main():
     ]
     if args.area == "grid":
         df["area_id"] = grid_area_ids(df, args.cell_m)
-    unit = "zip" if args.area == "zip" else f"grid{int(args.cell_m)}m"
 
     report = {"data": args.data, "rows": len(df), "unit": unit, "outcomes": {}}
+    comparisons = []
     for outcome in args.outcomes:
         needs = {
             "resolution_days": "closed_date",
@@ -93,6 +111,9 @@ def main():
             os.path.join(args.output_dir, f"rolling_summary_{tag}.csv"), index=False
         )
         report["outcomes"][outcome] = info
+        comparisons.append(
+            paired_comparisons(per_fold, seed=args.seed).assign(outcome=outcome)
+        )
 
         print(f"\n=== {outcome} | {unit} | {len(info['test_folds'])} test folds ===")
         print(f"Tuned weights (on {len(info['tuning_folds'])} earlier folds): ", end="")
@@ -104,7 +125,44 @@ def main():
 
     with open(os.path.join(args.output_dir, f"rolling_info_{unit}.json"), "w") as f:
         json.dump(report, f, indent=2, default=str)
+    save_comparisons(comparisons, args.output_dir, unit)
     print(f"\nResults saved to {args.output_dir}")
+
+
+def save_comparisons(comparisons, output_dir, unit):
+    """Write the paired comparisons for all outcomes of one unit to one file."""
+    if not comparisons:
+        return
+    table = pd.concat(comparisons, ignore_index=True)
+    table.insert(0, "outcome", table.pop("outcome"))
+    path = os.path.join(output_dir, f"rolling_comparisons_{unit}.csv")
+    table.to_csv(path, index=False)
+    print(f"\n=== paired comparisons | {unit} ===")
+    print(table.drop(columns=["metric"]).round(3).to_string(index=False))
+
+
+def rebuild_from_folds(output_dir, unit, outcomes, seed):
+    """Recompute summaries and comparisons from saved rolling_folds_*.csv files."""
+    comparisons = []
+    for outcome in outcomes:
+        tag = f"{outcome}_{unit}"
+        path = os.path.join(output_dir, f"rolling_folds_{tag}.csv")
+        if not os.path.exists(path):
+            print(f"No {path}; skipping {outcome}.")
+            continue
+        per_fold = pd.read_csv(path)
+        metrics = [
+            c
+            for c in per_fold.columns
+            if c.startswith(("ndcg@", "recall@", "spearman"))
+        ]
+        summarize_folds(per_fold, metrics, seed=seed).to_csv(
+            os.path.join(output_dir, f"rolling_summary_{tag}.csv"), index=False
+        )
+        comparisons.append(
+            paired_comparisons(per_fold, seed=seed).assign(outcome=outcome)
+        )
+    save_comparisons(comparisons, output_dir, unit)
 
 
 if __name__ == "__main__":

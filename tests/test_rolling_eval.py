@@ -6,6 +6,7 @@ from civinlp.eval.rolling_eval import (
     area_features,
     bootstrap_ci,
     grid_area_ids,
+    paired_comparisons,
     priority_from_features,
     rolling_origins,
     run_rolling_evaluation,
@@ -107,6 +108,33 @@ def test_bootstrap_ci_and_paired_summary():
     assert summary.loc["count_only", "diff_vs_count_only"] == 0.0
     assert summary.loc["other", "diff_vs_count_only"] == pytest.approx(0.1 / 3)
     assert summary.loc["other", "win_rate"] == pytest.approx(2 / 3)
+
+
+def test_block_bootstrap_resamples_runs_of_folds():
+    values = np.arange(10, dtype=float)
+    lo, hi = bootstrap_ci(values, block=3)
+    assert lo <= values.mean() <= hi
+    # A block as long as the series can only resample the series itself
+    lo, hi = bootstrap_ci(values, block=10)
+    assert lo == hi == pytest.approx(values.mean())
+
+
+def test_paired_comparisons():
+    per_fold = pd.DataFrame(
+        {
+            "fold": [0, 1, 2, 3] * 2,
+            "ranking": ["learned_volume_type"] * 4
+            + ["learned_volume_type_severity"] * 4,
+            "spearman_vs_future": [0.1, 0.2, 0.3, 0.4, 0.2, 0.2, 0.4, 0.5],
+        }
+    )
+    table = paired_comparisons(per_fold).set_index("comparison")
+    # Only the comparison whose rankers are both present is reported
+    assert list(table.index) == ["severity_on_volume_type"]
+    row = table.loc["severity_on_volume_type"]
+    assert row["diff"] == pytest.approx(0.075)
+    assert row["ci_low"] <= row["diff"] <= row["ci_high"]
+    assert row["win_rate"] == pytest.approx(0.75)
 
 
 def test_run_rolling_evaluation_end_to_end():

@@ -403,30 +403,112 @@ def fit_learned_rankers(
     return models, chosen
 
 
+BLOCK_SIZE = 3
+N_BOOT = 5000
+
+# (label, ranking, reference): the paired differences behind the paper's Table 4.
+# Each asks what the first ranker adds over the second on the same folds.
+PAIRED_COMPARISONS = [
+    ("severity_shrunk_minus_count", "severity_shrunk", "count_only"),
+    ("severity_on_volume", "learned_volume_severity", "learned_volume"),
+    ("type_on_volume", "learned_volume_type", "learned_volume"),
+    (
+        "type_on_volume_severity",
+        "learned_volume_type_severity",
+        "learned_volume_severity",
+    ),
+    ("severity_on_volume_type", "learned_volume_type_severity", "learned_volume_type"),
+    (
+        "severity_on_volume_descriptor",
+        "learned_volume_descriptor_severity",
+        "learned_volume_descriptor",
+    ),
+    (
+        "descriptor_vs_type_severity",
+        "learned_volume_descriptor",
+        "learned_volume_type_severity",
+    ),
+]
+
+
 def bootstrap_ci(
-    values: np.ndarray, n_boot: int = 2000, level: float = 0.95, seed: int = 42
+    values: np.ndarray,
+    n_boot: int = N_BOOT,
+    level: float = 0.95,
+    seed: int = 42,
+    block: int = BLOCK_SIZE,
 ) -> Tuple[float, float]:
-    """Percentile bootstrap CI of the mean over folds."""
+    """
+    Percentile moving-block bootstrap CI of the mean over folds.
+
+    Adjacent folds share data (each fold's future window is the next fold's
+    history), so folds are resampled in runs of `block` consecutive folds;
+    resampling single folds would give intervals that are too narrow.
+    `block=1` is the ordinary bootstrap.
+    """
     values = np.asarray(values, dtype=float)
     values = values[~np.isnan(values)]
-    if len(values) < 2:
+    k = len(values)
+    if k < 2:
         return (float("nan"), float("nan"))
+    block = max(1, min(block, k))
+    n_blocks = int(math.ceil(k / block))
     rng = np.random.RandomState(seed)
-    means = rng.choice(values, size=(n_boot, len(values)), replace=True).mean(axis=1)
+    starts = rng.randint(0, k - block + 1, size=(n_boot, n_blocks))
+    idx = (starts[:, :, None] + np.arange(block)).reshape(n_boot, -1)[:, :k]
+    means = values[idx].mean(axis=1)
     tail = (1 - level) / 2 * 100
     return float(np.percentile(means, tail)), float(np.percentile(means, 100 - tail))
+
+
+def paired_comparisons(
+    per_fold: pd.DataFrame,
+    comparisons: Optional[List[Tuple[str, str, str]]] = None,
+    metric: str = "spearman_vs_future",
+    n_boot: int = N_BOOT,
+    block: int = BLOCK_SIZE,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Mean paired per-fold difference `ranking - reference` with its block
+    bootstrap CI, for each comparison whose rankers are both in `per_fold`.
+    """
+    comparisons = comparisons or PAIRED_COMPARISONS
+    wide = per_fold.pivot(index="fold", columns="ranking", values=metric)
+    rows = []
+    for label, name, reference in comparisons:
+        if name not in wide or reference not in wide:
+            continue
+        diff = (wide[name] - wide[reference]).to_numpy()
+        lo, hi = bootstrap_ci(diff, n_boot, seed=seed, block=block)
+        rows.append(
+            {
+                "comparison": label,
+                "ranking": name,
+                "reference": reference,
+                "metric": metric,
+                "n_folds": int(np.sum(~np.isnan(diff))),
+                "diff": float(np.nanmean(diff)),
+                "ci_low": lo,
+                "ci_high": hi,
+                "win_rate": float(np.nanmean(diff > 0)),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def summarize_folds(
     per_fold: pd.DataFrame,
     metrics: List[str],
     reference: str = "count_only",
-    n_boot: int = 2000,
+    n_boot: int = N_BOOT,
     seed: int = 42,
+    block: int = BLOCK_SIZE,
 ) -> pd.DataFrame:
     """
-    Mean and 95% bootstrap CI per ranking, plus the paired per-fold difference
-    from `reference` (its CI and the share of folds where the ranking wins).
+    Mean and 95% block bootstrap CI per ranking, plus the paired per-fold
+    difference from `reference` (its CI and the share of folds where the
+    ranking wins).
     """
     rows = []
     ref = per_fold[per_fold["ranking"] == reference].set_index("fold")
@@ -434,9 +516,9 @@ def summarize_folds(
         group = group.set_index("fold")
         for metric in metrics:
             values = group[metric].to_numpy()
-            lo, hi = bootstrap_ci(values, n_boot, seed=seed)
+            lo, hi = bootstrap_ci(values, n_boot, seed=seed, block=block)
             diff = (group[metric] - ref[metric].reindex(group.index)).to_numpy()
-            dlo, dhi = bootstrap_ci(diff, n_boot, seed=seed)
+            dlo, dhi = bootstrap_ci(diff, n_boot, seed=seed, block=block)
             rows.append(
                 {
                     "ranking": name,
