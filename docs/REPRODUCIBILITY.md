@@ -181,7 +181,7 @@ python scripts/verdict_agreement.py score --sheet paper/verdict_second_rater.csv
 
 The template-to-verdict table behind the confirmed-share outcome is `docs/verdict_mapping.csv`; the phrase rules that produce it are in `civinlp/eval/outcome_eval.py`.
 
-Sensitivity to the two ambiguous templates ("Ambiguous templates" in Section 6) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:
+Sensitivity to the two ambiguous templates ("Ambiguous templates" in Appendix C) reruns the confirmed-share evaluation with each reassigned, by zip code and by grid cell, and writes `results/rolling/verdict_sensitivity.csv`:
 
 ```bash
 python scripts/verdict_sensitivity.py --data data_processed/roads_processed_2y_res.parquet --output results/rolling/verdict_sensitivity.csv
