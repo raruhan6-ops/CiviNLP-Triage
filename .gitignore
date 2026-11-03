@@ -43,3 +43,6 @@ logs/
 /models/
 *.pt
 *.bin
+
+# Local tool settings
+.claude/

@@ -172,7 +172,7 @@ python scripts/simultaneous_intervals.py --outcomes pavement_deficit pavement_po
 python scripts/simultaneous_intervals.py --outcomes pavement_change pavement_decline --units zip --block 4 --tag _pavement_change_zip
 ```
 
-Agreement with a second, blind rater on the verdict table (see `docs/LABEL_GUIDE.md`):
+Agreement between the verdict table and a relabelling made with the verdicts hidden (see `docs/LABEL_GUIDE.md`; the paper reports one by the co-author who reviewed the table, a consistency check rather than independent agreement):
 
 ```bash
 python scripts/verdict_agreement.py make-sheet --sheet paper/verdict_second_rater.csv
